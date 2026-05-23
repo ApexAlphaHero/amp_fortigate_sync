@@ -13,10 +13,14 @@ amp:
 
 fortigate:
   host: "https://192.168.1.1"        # FortiGate management IP/hostname
-  ext_ip: ""                          # FortiGate WAN/external IP for VIP port forwarding
+  ext_ip: ""                          # Public IP address used as the VIP external IP
   interfaces:
     - "port1"                         # WAN interface name(s) for firewall policies
   ssl_verify: true
+
+# Local IP of this server — used as the mapped (internal) IP in VIPs.
+# Leave blank to auto-detect from the default network route.
+host_ip: ""
 
 poll_interval_seconds: 30
 log_level: "INFO"

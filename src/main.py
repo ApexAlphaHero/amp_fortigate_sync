@@ -140,11 +140,19 @@ def main():
     if not ext_ip:
         logger.warning("fortigate.ext_ip is not set — VIPs will be created with an empty external IP")
 
+    host_ip = cfg.get("host_ip", "")
+    if not host_ip:
+        host_ip = Reconciler._detect_host_ip()
+        logger.info("Auto-detected host IP: %s", host_ip)
+    else:
+        logger.info("Using configured host IP: %s", host_ip)
+
     reconciler = Reconciler(
         docker_inspector=docker_inspector,
         state_manager=state_manager,
         fortigate_client=fg_client,
         ext_ip=ext_ip,
+        host_ip=host_ip,
         amp_client=amp_client,
         interfaces=fg_cfg.get("interfaces", ["port1"]),
     )

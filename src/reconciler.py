@@ -31,6 +31,7 @@ class Reconciler:
         state_manager: StateManager,
         fortigate_client: FortigateClient,
         ext_ip: str,
+        host_ip: str = "",
         amp_client: Optional[AMPClient] = None,
         interfaces: Optional[list[str]] = None,
     ):
@@ -38,6 +39,7 @@ class Reconciler:
         self._state = state_manager
         self._fg = fortigate_client
         self._ext_ip = ext_ip
+        self._host_ip = host_ip or self._detect_host_ip()
         self._amp = amp_client
         self._interfaces = interfaces or ["port1"]
 
@@ -58,7 +60,7 @@ class Reconciler:
                 expected_vip_names.add(_obj_name(label, port_info["host_port"], port_info["protocol"]))
 
         stats = {"added": 0, "removed": 0, "errors": 0}
-        host_ip = self._get_docker_host_ip()
+        host_ip = self._host_ip
 
         # Ensure rules exist for every running container
         for cid, container in current_containers.items():
@@ -195,8 +197,14 @@ class Reconciler:
         return container["name"]
 
     @staticmethod
-    def _get_docker_host_ip() -> str:
+    def _detect_host_ip() -> str:
+        """Reliably find this machine's outbound IP by connecting a UDP socket.
+        No traffic is actually sent — the OS picks the right source interface."""
         try:
-            return socket.gethostbyname(socket.gethostname())
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
         except OSError:
             return "127.0.0.1"
