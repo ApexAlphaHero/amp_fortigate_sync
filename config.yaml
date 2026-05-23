@@ -1,18 +1,21 @@
+# Credentials are NOT stored here — put them in /etc/amp-fw-sync/secrets.env:
+#
+#   AMP_USERNAME=your-amp-username
+#   AMP_PASSWORD=your-amp-password
+#   FORTIGATE_API_TOKEN=your-fortigate-token
+
 docker:
   socket: "unix:///var/run/docker.sock"
   label_filter: ""  # e.g. "amp-sync=true" — leave blank to watch all containers
 
 amp:
-  host: "http://localhost:8080"
-  username: ""  # set via AMP_USERNAME env var
-  password: ""  # set via AMP_PASSWORD env var
+  host: "http://localhost:8080"  # AMP web UI base URL
 
 fortigate:
-  host: "https://192.168.1.1"
-  token: ""  # set via FORTIGATE_API_TOKEN env var
-  ext_ip: ""  # FortiGate WAN/external IP — used as the VIP extip for port forwarding
+  host: "https://192.168.1.1"        # FortiGate management IP/hostname
+  ext_ip: ""                          # FortiGate WAN/external IP for VIP port forwarding
   interfaces:
-    - "port1"
+    - "port1"                         # WAN interface name(s) for firewall policies
   ssl_verify: true
 
 poll_interval_seconds: 30
