@@ -5,6 +5,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+_AMP_HEADERS = {
+    "Accept": "application/vnd.cubecoders-ampapi",
+    "Content-Type": "application/json",
+}
+
 
 class AMPClient:
     def __init__(self, host: str, username: str, password: str):
@@ -12,17 +17,20 @@ class AMPClient:
         self._username = username
         self._password = password
         self._session = requests.Session()
-        self._session.headers.update({
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        })
+        self._session.headers.update(_AMP_HEADERS)
         self._session_id: Optional[str] = None
 
     def _login(self) -> bool:
         try:
             resp = self._session.post(
                 f"{self._base}/API/Core/Login",
-                json={"username": self._username, "password": self._password, "token": "", "rememberMe": False},
+                json={
+                    "username": self._username,
+                    "password": self._password,
+                    "token": "",
+                    "rememberMe": False,
+                    "SESSIONID": "",
+                },
                 timeout=5,
             )
             resp.raise_for_status()
@@ -36,27 +44,27 @@ class AMPClient:
                 logger.warning("AMP login succeeded but no sessionID in response")
                 return False
             self._session_id = session_id
+            logger.info("AMP login successful")
             return True
         except requests.RequestException as e:
             logger.warning("AMP login failed: %s", e)
             return False
 
-    def _get(self, path: str) -> Optional[dict]:
+    def _post(self, path: str, **kwargs) -> Optional[dict]:
+        """All AMP API calls are POST with SESSIONID in the body."""
         if not self._session_id and not self._login():
             return None
+
+        body = kwargs.get("json", {})
+        body["SESSIONID"] = self._session_id
+        kwargs["json"] = body
+
         try:
-            resp = self._session.get(
-                f"{self._base}{path}",
-                params={"SESSIONID": self._session_id},
-                timeout=5,
-            )
+            resp = self._session.post(f"{self._base}{path}", timeout=5, **kwargs)
             if resp.status_code == 401:
                 if self._login():
-                    resp = self._session.get(
-                        f"{self._base}{path}",
-                        params={"SESSIONID": self._session_id},
-                        timeout=5,
-                    )
+                    body["SESSIONID"] = self._session_id
+                    resp = self._session.post(f"{self._base}{path}", timeout=5, **kwargs)
                 else:
                     return None
             resp.raise_for_status()
@@ -67,12 +75,10 @@ class AMPClient:
 
     def get_instances(self) -> dict[str, dict]:
         """
-        Returns a mapping of AMP instance friendly name → metadata dict.
-        Ports are extracted from ApplicationEndpoints and returned as a list
-        of {host_port, protocol} dicts — the same shape Docker inspector uses.
+        Returns a mapping of AMP instance friendly name → metadata dict including ports.
         Falls back to empty dict if AMP is unreachable or login fails.
         """
-        data = self._get("/API/ADSModule/GetInstances")
+        data = self._post("/API/ADSModule/GetInstances", json={})
         if data is None:
             return {}
 
@@ -92,19 +98,13 @@ class AMPClient:
 
     @staticmethod
     def _parse_endpoints(endpoints: list) -> list[dict]:
-        """Parse ApplicationEndpoints into [{host_port, protocol}] dicts.
-
-        Each endpoint has an 'Endpoint' field like '0.0.0.0:7777' or '7777'.
-        Protocol defaults to UDP for game servers (most common) but can be
-        overridden via the DisplayName containing 'TCP'.
-        """
+        """Parse ApplicationEndpoints into [{host_port, protocol}] dicts."""
         ports = []
         seen = set()
         for ep in endpoints:
             endpoint_str = ep.get("Endpoint", "")
             display = (ep.get("DisplayName") or "").upper()
 
-            # Extract port from "ip:port" or bare "port"
             if ":" in endpoint_str:
                 _, port_str = endpoint_str.rsplit(":", 1)
             else:
