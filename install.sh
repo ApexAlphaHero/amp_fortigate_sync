@@ -78,7 +78,7 @@ echo " STEP 1 OF 2 — Secrets"
 echo " Fill in your AMP and FortiGate credentials, then save and close."
 echo "======================================================================"
 read -r -p "Press Enter to open secrets.env..."
-nano "${SECRETS_FILE}"
+${EDITOR:-vi} "${SECRETS_FILE}"
 
 # ---------------------------------------------------------------------------
 # Deploy (copies files, installs venv, registers systemd unit)
@@ -102,7 +102,7 @@ echo " NOTE: Re-running deploy.sh will overwrite ${CONFIG_FILE}"
 echo " with the copy from your git clone. Keep both in sync."
 echo "======================================================================"
 read -r -p "Press Enter to open config.yaml..."
-nano "${CONFIG_FILE}"
+${EDITOR:-vi} "${CONFIG_FILE}"
 
 # ---------------------------------------------------------------------------
 # Restart service to pick up the edited config
