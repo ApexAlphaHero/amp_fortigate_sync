@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# install.sh — full system install for amp-fw-sync on Debian (Forky/Trixie/Bookworm)
+# install.sh — install amp-fw-sync on Debian (Forky/Trixie/Bookworm)
+# Requires Docker to already be installed.
 # Run as root: sudo bash install.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_USER="amp-sync"
+SECRETS_FILE="/etc/amp-fw-sync/secrets.env"
 
 # ---------------------------------------------------------------------------
 # Guards
@@ -21,16 +23,12 @@ if ! grep -qi "debian" /etc/os-release 2>/dev/null; then
   exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Detect codename (forky, trixie, bookworm, ...)
-# ---------------------------------------------------------------------------
-
-. /etc/os-release
-DEBIAN_CODENAME="${VERSION_CODENAME:-}"
-if [[ -z "${DEBIAN_CODENAME}" ]]; then
-  DEBIAN_CODENAME="$(lsb_release -cs 2>/dev/null || echo bookworm)"
+if ! command -v docker &>/dev/null; then
+  echo "ERROR: Docker is not installed. Please install Docker first." >&2
+  exit 1
 fi
-echo "==> Detected Debian codename: ${DEBIAN_CODENAME}"
+
+echo "==> Docker: $(docker --version)"
 
 # ---------------------------------------------------------------------------
 # System packages
@@ -44,49 +42,7 @@ apt-get install -y --no-install-recommends \
   python3 \
   python3-venv \
   python3-pip \
-  curl \
-  ca-certificates \
-  gnupg \
-  lsb-release \
   sqlite3
-
-# ---------------------------------------------------------------------------
-# Docker Engine (official Docker repo)
-# ---------------------------------------------------------------------------
-
-if command -v docker &>/dev/null; then
-  echo "==> Docker already installed ($(docker --version)), skipping."
-else
-  echo "==> Adding Docker apt repository..."
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/debian/gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-
-  # Docker may not yet publish a Forky repo; fall back to bookworm if needed.
-  DOCKER_CODENAME="${DEBIAN_CODENAME}"
-  DOCKER_REPO_URL="https://download.docker.com/linux/debian"
-  if ! curl -fsSL --head \
-      "${DOCKER_REPO_URL}/dists/${DOCKER_CODENAME}/Release" &>/dev/null; then
-    echo "    Docker repo not yet available for '${DOCKER_CODENAME}', using 'bookworm'."
-    DOCKER_CODENAME="bookworm"
-  fi
-
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-${DOCKER_REPO_URL} ${DOCKER_CODENAME} stable" \
-    > /etc/apt/sources.list.d/docker.list
-
-  apt-get update -qq
-  apt-get install -y --no-install-recommends \
-    docker-ce \
-    docker-ce-cli \
-    containerd.io \
-    docker-buildx-plugin
-
-  systemctl enable --now docker
-  echo "==> Docker installed: $(docker --version)"
-fi
 
 # ---------------------------------------------------------------------------
 # Service user → docker group (needs socket access)
@@ -100,9 +56,35 @@ echo "==> Adding '${SERVICE_USER}' to the docker group..."
 usermod -aG docker "${SERVICE_USER}"
 
 # ---------------------------------------------------------------------------
+# Pre-populate secrets file if it doesn't exist yet
+# ---------------------------------------------------------------------------
+
+if [[ ! -f "${SECRETS_FILE}" ]]; then
+  mkdir -p "$(dirname "${SECRETS_FILE}")"
+  cat > "${SECRETS_FILE}" <<'EOF'
+AMP_USERNAME=
+AMP_PASSWORD=
+FORTIGATE_API_TOKEN=
+EOF
+  chmod 600 "${SECRETS_FILE}"
+  chown root:root "${SECRETS_FILE}"
+  echo "==> Created ${SECRETS_FILE} — please fill in your credentials."
+else
+  echo "==> ${SECRETS_FILE} already exists, leaving it unchanged."
+fi
+
+echo ""
+echo "----------------------------------------------------------------------"
+echo " Fill in your credentials now:"
+echo "   nano ${SECRETS_FILE}"
+echo ""
+echo " Then press Enter to continue the install."
+echo "----------------------------------------------------------------------"
+read -r -p ""
+
+# ---------------------------------------------------------------------------
 # Run the deploy script
 # ---------------------------------------------------------------------------
 
-echo ""
 echo "==> Running deploy.sh..."
 bash "${SCRIPT_DIR}/deploy.sh"

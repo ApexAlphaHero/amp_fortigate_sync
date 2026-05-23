@@ -38,19 +38,13 @@ chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}" "${STATE_DIR}"
 chmod 750 "${INSTALL_DIR}" "${STATE_DIR}"
 
 if [[ ! -f "${SECRETS_FILE}" ]]; then
-  echo ""
-  echo "----------------------------------------------------------------------"
-  echo " SECRETS REQUIRED — populate ${SECRETS_FILE}"
-  echo "----------------------------------------------------------------------"
-  echo " Run the following, then press Enter to continue:"
-  echo ""
-  echo "   sudo tee ${SECRETS_FILE} <<'EOF'"
-  echo "   AMP_USERNAME=your-amp-username"
-  echo "   AMP_PASSWORD=your-amp-password"
-  echo "   FORTIGATE_API_TOKEN=your-fortigate-token-here"
-  echo "   EOF"
-  echo ""
-  read -r -p "Press Enter once secrets are written... "
+  mkdir -p "$(dirname "${SECRETS_FILE}")"
+  cat > "${SECRETS_FILE}" <<'EOF'
+AMP_USERNAME=
+AMP_PASSWORD=
+FORTIGATE_API_TOKEN=
+EOF
+  echo "==> Created ${SECRETS_FILE} — fill in credentials before starting the service."
 fi
 
 chmod 600 "${SECRETS_FILE}"
