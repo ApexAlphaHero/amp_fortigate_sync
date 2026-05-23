@@ -10,6 +10,7 @@ amp:
 fortigate:
   host: "https://192.168.1.1"
   token: ""  # set via FORTIGATE_API_TOKEN env var
+  ext_ip: ""  # FortiGate WAN/external IP — used as the VIP extip for port forwarding
   interfaces:
     - "port1"
   ssl_verify: true

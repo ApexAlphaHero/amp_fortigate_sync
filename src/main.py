@@ -136,10 +136,15 @@ def main():
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     state_manager = StateManager(db_path=db_path)
 
+    ext_ip = fg_cfg.get("ext_ip", "")
+    if not ext_ip:
+        logger.warning("fortigate.ext_ip is not set — VIPs will be created with an empty external IP")
+
     reconciler = Reconciler(
         docker_inspector=docker_inspector,
         state_manager=state_manager,
         fortigate_client=fg_client,
+        ext_ip=ext_ip,
         amp_client=amp_client,
         interfaces=fg_cfg.get("interfaces", ["port1"]),
     )

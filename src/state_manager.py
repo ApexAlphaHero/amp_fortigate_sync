@@ -20,70 +20,71 @@ class StateManager:
             with self._connect() as conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS container_state (
-                        container_id   TEXT PRIMARY KEY,
-                        name           TEXT NOT NULL,
-                        ports          TEXT NOT NULL,
-                        policy_ids     TEXT NOT NULL,
-                        address_obj_name TEXT NOT NULL
+                        container_id      TEXT PRIMARY KEY,
+                        name              TEXT NOT NULL,
+                        ports             TEXT NOT NULL,
+                        policy_ids        TEXT NOT NULL,
+                        vip_names         TEXT NOT NULL,
+                        service_obj_names TEXT NOT NULL
                     )
                 """)
+                # Migrate existing DBs that still have the old address_obj_name column
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(container_state)")}
+                if "vip_names" not in cols:
+                    conn.execute("ALTER TABLE container_state ADD COLUMN vip_names TEXT NOT NULL DEFAULT '[]'")
+                if "service_obj_names" not in cols:
+                    conn.execute("ALTER TABLE container_state ADD COLUMN service_obj_names TEXT NOT NULL DEFAULT '[]'")
 
     def load_all(self) -> dict:
         with self._lock:
             with self._connect() as conn:
                 rows = conn.execute("SELECT * FROM container_state").fetchall()
-        result = {}
-        for row in rows:
-            result[row["container_id"]] = {
-                "name": row["name"],
-                "ports": json.loads(row["ports"]),
-                "policy_ids": json.loads(row["policy_ids"]),
-                "address_obj_name": row["address_obj_name"],
-            }
-        return result
+        return {row["container_id"]: self._row_to_dict(row) for row in rows}
 
     def save(self, container_id: str, data: dict):
         with self._lock:
             with self._connect() as conn:
                 conn.execute(
                     """
-                    INSERT INTO container_state (container_id, name, ports, policy_ids, address_obj_name)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO container_state
+                        (container_id, name, ports, policy_ids, vip_names, service_obj_names)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(container_id) DO UPDATE SET
-                        name             = excluded.name,
-                        ports            = excluded.ports,
-                        policy_ids       = excluded.policy_ids,
-                        address_obj_name = excluded.address_obj_name
+                        name              = excluded.name,
+                        ports             = excluded.ports,
+                        policy_ids        = excluded.policy_ids,
+                        vip_names         = excluded.vip_names,
+                        service_obj_names = excluded.service_obj_names
                     """,
                     (
                         container_id,
                         data["name"],
                         json.dumps(data["ports"]),
                         json.dumps(data["policy_ids"]),
-                        data["address_obj_name"],
+                        json.dumps(data["vip_names"]),
+                        json.dumps(data["service_obj_names"]),
                     ),
                 )
 
     def remove(self, container_id: str):
         with self._lock:
             with self._connect() as conn:
-                conn.execute(
-                    "DELETE FROM container_state WHERE container_id = ?",
-                    (container_id,),
-                )
+                conn.execute("DELETE FROM container_state WHERE container_id = ?", (container_id,))
 
     def get(self, container_id: str) -> Optional[dict]:
         with self._lock:
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT * FROM container_state WHERE container_id = ?",
-                    (container_id,),
+                    "SELECT * FROM container_state WHERE container_id = ?", (container_id,)
                 ).fetchone()
-        if row is None:
-            return None
+        return self._row_to_dict(row) if row else None
+
+    @staticmethod
+    def _row_to_dict(row) -> dict:
         return {
             "name": row["name"],
             "ports": json.loads(row["ports"]),
             "policy_ids": json.loads(row["policy_ids"]),
-            "address_obj_name": row["address_obj_name"],
+            "vip_names": json.loads(row["vip_names"]),
+            "service_obj_names": json.loads(row["service_obj_names"]),
         }

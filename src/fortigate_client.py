@@ -3,7 +3,6 @@ import time
 from typing import Optional
 
 import requests
-import requests.adapters
 
 logger = logging.getLogger(__name__)
 
@@ -42,74 +41,109 @@ class FortigateClient:
                 time.sleep(wait)
         return {}  # unreachable
 
-    # ------------------------------------------------------------------
-    # Address objects
-    # ------------------------------------------------------------------
-
-    def create_address_object(self, name: str, ip: str) -> dict:
-        payload = {
-            "name": name,
-            "type": "ipmask",
-            "subnet": f"{ip}/32",
-            "comment": _SYNC_TAG,
-        }
-        logger.info("Creating FortiGate address object: %s → %s", name, ip)
-        return self._request("POST", "/api/v2/cmdb/firewall/address/", json=payload)
-
-    def delete_address_object(self, name: str):
-        logger.info("Deleting FortiGate address object: %s", name)
+    def _delete(self, path: str, label: str):
+        """DELETE with silent 404 handling."""
         try:
-            self._request("DELETE", f"/api/v2/cmdb/firewall/address/{name}")
+            self._request("DELETE", path)
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
-                logger.debug("Address object %s already gone", name)
+                logger.debug("%s already gone", label)
             else:
                 raise
+
+    # ------------------------------------------------------------------
+    # Virtual IPs  (DNAT / port forwarding)
+    # ------------------------------------------------------------------
+
+    def get_managed_vips(self) -> list[dict]:
+        data = self._request("GET", "/api/v2/cmdb/firewall/vip/")
+        return [v for v in data.get("results", []) if _SYNC_TAG in (v.get("comment") or "")]
+
+    def create_vip(
+        self,
+        name: str,
+        ext_ip: str,
+        ext_port: int,
+        mapped_ip: str,
+        mapped_port: int,
+        protocol: str,
+    ) -> dict:
+        payload = {
+            "name": name,
+            "type": "static-nat",
+            "extip": ext_ip,
+            "extintf": "any",
+            "portforward": "enable",
+            "protocol": protocol.lower(),
+            "extport": str(ext_port),
+            "mappedip": [{"range": mapped_ip}],
+            "mappedport": str(mapped_port),
+            "comment": _SYNC_TAG,
+        }
+        logger.info("Creating VIP: %s  %s:%d → %s:%d/%s", name, ext_ip, ext_port, mapped_ip, mapped_port, protocol)
+        return self._request("POST", "/api/v2/cmdb/firewall/vip/", json=payload)
+
+    def delete_vip(self, name: str):
+        logger.info("Deleting VIP: %s", name)
+        self._delete(f"/api/v2/cmdb/firewall/vip/{name}", f"VIP {name}")
+
+    # ------------------------------------------------------------------
+    # Service objects
+    # ------------------------------------------------------------------
+
+    def get_managed_service_objects(self) -> list[dict]:
+        data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/")
+        return [s for s in data.get("results", []) if _SYNC_TAG in (s.get("comment") or "")]
+
+    def create_service_object(self, name: str, port: int, protocol: str) -> dict:
+        proto_upper = protocol.upper()
+        port_str = str(port)
+        payload = {
+            "name": name,
+            "protocol": "TCP/UDP/SCTP",
+            "comment": _SYNC_TAG,
+        }
+        if proto_upper == "UDP":
+            payload["udp-portrange"] = port_str
+        else:
+            payload["tcp-portrange"] = port_str
+        logger.info("Creating service object: %s  port %d/%s", name, port, protocol)
+        return self._request("POST", "/api/v2/cmdb/firewall.service/custom/", json=payload)
+
+    def delete_service_object(self, name: str):
+        logger.info("Deleting service object: %s", name)
+        self._delete(f"/api/v2/cmdb/firewall.service/custom/{name}", f"service {name}")
 
     # ------------------------------------------------------------------
     # Policies
     # ------------------------------------------------------------------
 
-    def get_managed_address_objects(self) -> list[dict]:
-        data = self._request("GET", "/api/v2/cmdb/firewall/address/")
-        results = data.get("results", [])
-        return [a for a in results if _SYNC_TAG in (a.get("comment") or "")]
-
     def get_managed_policies(self) -> list[dict]:
         data = self._request("GET", "/api/v2/cmdb/firewall/policy/")
-        results = data.get("results", [])
-        return [p for p in results if _SYNC_TAG in (p.get("comments") or "")]
+        return [p for p in data.get("results", []) if _SYNC_TAG in (p.get("comments") or "")]
 
     def create_policy(
         self,
         name: str,
-        port: int,
-        protocol: str,
-        address_obj_name: str,
+        vip_name: str,
+        service_obj_name: str,
         interfaces: Optional[list[str]] = None,
     ) -> dict:
         srcintf = [{"name": iface} for iface in (interfaces or ["port1"])]
-        service_name = f"TCP_{port}" if protocol.lower() == "tcp" else f"UDP_{port}"
         payload = {
             "name": name,
             "srcintf": srcintf,
             "dstintf": [{"name": "any"}],
             "srcaddr": [{"name": "all"}],
-            "dstaddr": [{"name": address_obj_name}],
-            "service": [{"name": service_name}],
+            "dstaddr": [{"name": vip_name}],
+            "service": [{"name": service_obj_name}],
             "action": "accept",
             "status": "enable",
             "comments": _SYNC_TAG,
         }
-        logger.info("Creating FortiGate policy: %s (port %d/%s)", name, port, protocol)
+        logger.info("Creating policy: %s  (vip=%s, svc=%s)", name, vip_name, service_obj_name)
         return self._request("POST", "/api/v2/cmdb/firewall/policy/", json=payload)
 
     def delete_policy(self, policy_id: int):
-        logger.info("Deleting FortiGate policy id: %s", policy_id)
-        try:
-            self._request("DELETE", f"/api/v2/cmdb/firewall/policy/{policy_id}")
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                logger.debug("Policy %s already gone", policy_id)
-            else:
-                raise
+        logger.info("Deleting policy id: %s", policy_id)
+        self._delete(f"/api/v2/cmdb/firewall/policy/{policy_id}", f"policy {policy_id}")
