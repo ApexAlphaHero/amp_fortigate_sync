@@ -1,5 +1,6 @@
 import logging
 import time
+import urllib3
 from typing import Optional
 
 import requests
@@ -14,9 +15,11 @@ _BACKOFF_BASE = 2.0
 class FortigateClient:
     def __init__(self, host: str, token: str, ssl_verify: bool = True):
         self._base = host.rstrip("/")
+        self._token = token
         self._verify = ssl_verify
         self._session = requests.Session()
-        self._session.headers.update({"Authorization": f"Bearer {token}"})
+        if not ssl_verify:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -27,9 +30,15 @@ class FortigateClient:
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         url = self._url(path)
+        # FortiGate REST API expects the token as a query parameter
+        params = kwargs.pop("params", {})
+        params["access_token"] = self._token
         for attempt in range(_MAX_RETRIES):
             try:
-                resp = self._session.request(method, url, verify=self._verify, timeout=15, **kwargs)
+                resp = self._session.request(
+                    method, url, verify=self._verify, timeout=15,
+                    params=params, **kwargs,
+                )
                 resp.raise_for_status()
                 return resp.json() if resp.content else {}
             except requests.RequestException as e:
