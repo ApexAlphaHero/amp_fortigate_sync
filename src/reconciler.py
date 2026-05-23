@@ -33,7 +33,6 @@ class Reconciler:
         ext_ip: str,
         host_ip: str = "",
         amp_client: Optional[AMPClient] = None,
-        interfaces: Optional[list[str]] = None,
     ):
         self._docker = docker_inspector
         self._state = state_manager
@@ -41,7 +40,6 @@ class Reconciler:
         self._ext_ip = ext_ip
         self._host_ip = host_ip or self._detect_host_ip()
         self._amp = amp_client
-        self._interfaces = interfaces or ["port1"]
 
     def reconcile(self) -> dict:
         current_containers = {c["id"]: c for c in self._docker.get_running_containers()}
@@ -145,7 +143,6 @@ class Reconciler:
                     name=name,
                     vip_name=name,
                     service_obj_name=name,
-                    interfaces=self._interfaces,
                 )
                 pid = (result.get("results") or [{}])[0].get("mkey")
                 if pid is not None:

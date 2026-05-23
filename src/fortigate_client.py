@@ -127,9 +127,8 @@ class FortigateClient:
         name: str,
         vip_name: str,
         service_obj_name: str,
-        interfaces: Optional[list[str]] = None,
     ) -> dict:
-        srcintf = [{"name": iface} for iface in (interfaces or ["port1"])]
+        srcintf = [{"name": "any"}]
         payload = {
             "name": name,
             "srcintf": srcintf,
@@ -141,7 +140,7 @@ class FortigateClient:
             "status": "enable",
             "comments": _SYNC_TAG,
         }
-        logger.info("Creating policy: %s  (vip=%s, svc=%s)", name, vip_name, service_obj_name)
+        logger.info("Creating policy: %s (vip=%s, svc=%s)", name, vip_name, service_obj_name)
         return self._request("POST", "/api/v2/cmdb/firewall/policy/", json=payload)
 
     def delete_policy(self, policy_id: int):

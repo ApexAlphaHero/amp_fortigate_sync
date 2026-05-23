@@ -154,7 +154,6 @@ def main():
         ext_ip=ext_ip,
         host_ip=host_ip,
         amp_client=amp_client,
-        interfaces=fg_cfg.get("interfaces", ["port1"]),
     )
 
     logger.info("Running initial reconcile...")
