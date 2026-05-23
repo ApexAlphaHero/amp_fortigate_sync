@@ -12,6 +12,10 @@ class AMPClient:
         self._username = username
         self._password = password
         self._session = requests.Session()
+        self._session.headers.update({
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        })
         self._session_id: Optional[str] = None
 
     def _login(self) -> bool:
