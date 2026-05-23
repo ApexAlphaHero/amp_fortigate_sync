@@ -28,9 +28,22 @@ from state_manager import StateManager
 # Config helpers
 # ---------------------------------------------------------------------------
 
+_SECRETS_PATHS = [
+    Path("/etc/amp-fw-sync/secrets.env"),          # production
+    Path(__file__).parent.parent / ".env",          # local dev
+]
+
+
 def _load_config() -> dict:
-    config_path = Path(__file__).parent.parent / "config.yaml"
-    load_dotenv()
+    for p in _SECRETS_PATHS:
+        if p.exists():
+            load_dotenv(p)
+            break
+
+    config_path = Path("/opt/amp-fw-sync/config.yaml")
+    if not config_path.exists():
+        config_path = Path(__file__).parent.parent / "config.yaml"
+
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
     cfg.setdefault("amp", {})["username"] = os.environ.get("AMP_USERNAME", cfg["amp"].get("username", ""))
