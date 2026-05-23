@@ -27,7 +27,11 @@ class AMPClient:
             )
             resp.raise_for_status()
             data = resp.json()
-            session_id = data.get("sessionID") or (data.get("result") or {}).get("sessionID")
+            if not data.get("success"):
+                reason = data.get("resultReason") or f"result code {data.get('result')}"
+                logger.warning("AMP login failed: %s", reason)
+                return False
+            session_id = data.get("sessionID")
             if not session_id:
                 logger.warning("AMP login succeeded but no sessionID in response")
                 return False
