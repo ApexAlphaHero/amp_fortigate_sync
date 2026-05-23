@@ -57,6 +57,25 @@ def test_create_policy(mock_session_cls):
 
 
 @patch("fortigate_client.requests.Session")
+def test_get_managed_address_objects_filters_by_tag(mock_session_cls):
+    mock_session = MagicMock()
+    mock_session_cls.return_value = mock_session
+    mock_session.request.return_value = _mock_response({
+        "results": [
+            {"name": "amp-sync-myapp", "comment": "[amp-sync]"},
+            {"name": "manual-addr", "comment": ""},
+            {"name": "amp-sync-other", "comment": "[amp-sync] extra"},
+        ]
+    })
+
+    client = make_client()
+    objs = client.get_managed_address_objects()
+
+    assert len(objs) == 2
+    assert all("[amp-sync]" in o["comment"] for o in objs)
+
+
+@patch("fortigate_client.requests.Session")
 def test_get_managed_policies_filters_by_tag(mock_session_cls):
     mock_session = MagicMock()
     mock_session_cls.return_value = mock_session

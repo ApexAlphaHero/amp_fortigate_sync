@@ -70,6 +70,11 @@ class FortigateClient:
     # Policies
     # ------------------------------------------------------------------
 
+    def get_managed_address_objects(self) -> list[dict]:
+        data = self._request("GET", "/api/v2/cmdb/firewall/address/")
+        results = data.get("results", [])
+        return [a for a in results if _SYNC_TAG in (a.get("comment") or "")]
+
     def get_managed_policies(self) -> list[dict]:
         data = self._request("GET", "/api/v2/cmdb/firewall/policy/")
         results = data.get("results", [])
