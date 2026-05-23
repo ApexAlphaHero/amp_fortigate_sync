@@ -1,0 +1,20 @@
+docker:
+  socket: "unix:///var/run/docker.sock"
+  label_filter: ""  # e.g. "amp-sync=true" — leave blank to watch all containers
+
+amp:
+  host: "http://localhost:8080"
+  username: ""  # set via AMP_USERNAME env var
+  password: ""  # set via AMP_PASSWORD env var
+
+fortigate:
+  host: "https://192.168.1.1"
+  token: ""  # set via FORTIGATE_API_TOKEN env var
+  interfaces:
+    - "port1"
+  ssl_verify: true
+
+poll_interval_seconds: 30
+log_level: "INFO"
+
+state_db_path: "/var/lib/amp-fw-sync/state.db"
