@@ -33,6 +33,18 @@ fi
 echo "==> Docker: $(docker --version)"
 
 # ---------------------------------------------------------------------------
+# Helper: check if a file has any non-empty variable value (VAR=something)
+# ---------------------------------------------------------------------------
+secrets_configured() {
+  grep -qE '^[A-Za-z_]+=.+' "${SECRETS_FILE}" 2>/dev/null
+}
+
+# Helper: check if config.yaml has been changed from the repo default
+config_modified() {
+  [[ -f "${CONFIG_FILE}" ]] && ! diff -q "${SCRIPT_DIR}/config.yaml" "${CONFIG_FILE}" &>/dev/null
+}
+
+# ---------------------------------------------------------------------------
 # System packages
 # ---------------------------------------------------------------------------
 
@@ -72,16 +84,26 @@ EOF
   chown root:root "${SECRETS_FILE}"
 fi
 
-echo ""
-echo "======================================================================"
-echo " STEP 1 OF 2 — Secrets"
-echo " Fill in your AMP and FortiGate credentials, then save and close."
-echo "======================================================================"
-read -r -p "Press Enter to open secrets.env..."
-${EDITOR:-vi} "${SECRETS_FILE}"
+if secrets_configured; then
+  echo "==> secrets.env already configured, skipping editor."
+else
+  echo ""
+  echo "======================================================================"
+  echo " STEP 1 OF 2 — Secrets"
+  echo " Fill in your AMP and FortiGate credentials, then save and close."
+  echo "======================================================================"
+  read -r -p "Press Enter to open secrets.env..."
+  ${EDITOR:-vi} "${SECRETS_FILE}"
+fi
 
 # ---------------------------------------------------------------------------
-# Deploy (copies files, installs venv, registers systemd unit)
+# Check if config was modified before deploy may copy a fresh one
+# ---------------------------------------------------------------------------
+
+CONFIG_WAS_MODIFIED=$(config_modified && echo true || echo false)
+
+# ---------------------------------------------------------------------------
+# Deploy (copies src/, installs venv, registers systemd unit)
 # ---------------------------------------------------------------------------
 
 echo ""
@@ -89,27 +111,27 @@ echo "==> Running deploy.sh..."
 bash "${SCRIPT_DIR}/deploy.sh"
 
 # ---------------------------------------------------------------------------
-# Step 2 — Config  (deploy.sh just copied config.yaml into place)
+# Step 2 — Config
+# ---------------------------------------------------------------------------
+
+if [[ "${CONFIG_WAS_MODIFIED}" == "true" ]]; then
+  echo "==> config.yaml already configured, skipping editor."
+else
+  echo ""
+  echo "======================================================================"
+  echo " STEP 2 OF 2 — Configuration"
+  echo " Set your FortiGate host, public IP, and AMP host, then save and close."
+  echo "======================================================================"
+  read -r -p "Press Enter to open config.yaml..."
+  ${EDITOR:-vi} "${CONFIG_FILE}"
+fi
+
+# ---------------------------------------------------------------------------
+# Restart service to pick up config
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "======================================================================"
-echo " STEP 2 OF 2 — Configuration"
-echo " Set your FortiGate host, external IP, WAN interface, and AMP host."
-echo " Save and close when done."
-echo ""
-echo " NOTE: Re-running deploy.sh will overwrite ${CONFIG_FILE}"
-echo " with the copy from your git clone. Keep both in sync."
-echo "======================================================================"
-read -r -p "Press Enter to open config.yaml..."
-${EDITOR:-vi} "${CONFIG_FILE}"
-
-# ---------------------------------------------------------------------------
-# Restart service to pick up the edited config
-# ---------------------------------------------------------------------------
-
-echo ""
-echo "==> Restarting ${SERVICE_NAME} with new config..."
+echo "==> Restarting ${SERVICE_NAME}..."
 systemctl restart "${SERVICE_NAME}"
 
 echo ""
