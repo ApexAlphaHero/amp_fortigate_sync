@@ -43,7 +43,6 @@ class AMPClient:
                 timeout=5,
             )
             if resp.status_code == 401:
-                # Session expired — re-login once
                 if self._login():
                     resp = self._session.get(
                         f"{self._base}{path}",
@@ -61,6 +60,8 @@ class AMPClient:
     def get_instances(self) -> dict[str, dict]:
         """
         Returns a mapping of AMP instance friendly name → metadata dict.
+        Ports are extracted from ApplicationEndpoints and returned as a list
+        of {host_port, protocol} dicts — the same shape Docker inspector uses.
         Falls back to empty dict if AMP is unreachable or login fails.
         """
         data = self._get("/API/ADSModule/GetInstances")
@@ -71,19 +72,49 @@ class AMPClient:
         for entry in data.get("result", []):
             for instance in entry.get("AvailableInstances", []):
                 name = instance.get("FriendlyName") or instance.get("InstanceName")
-                if name:
-                    instances[name] = {
-                        "instance_id": instance.get("InstanceID"),
-                        "module": instance.get("ModuleName"),
-                        "running": instance.get("Running", False),
-                    }
+                if not name:
+                    continue
+                instances[name] = {
+                    "instance_id": instance.get("InstanceID"),
+                    "module": instance.get("ModuleName"),
+                    "running": instance.get("Running", False),
+                    "ports": self._parse_endpoints(instance.get("ApplicationEndpoints", [])),
+                }
         return instances
 
+    @staticmethod
+    def _parse_endpoints(endpoints: list) -> list[dict]:
+        """Parse ApplicationEndpoints into [{host_port, protocol}] dicts.
+
+        Each endpoint has an 'Endpoint' field like '0.0.0.0:7777' or '7777'.
+        Protocol defaults to UDP for game servers (most common) but can be
+        overridden via the DisplayName containing 'TCP'.
+        """
+        ports = []
+        seen = set()
+        for ep in endpoints:
+            endpoint_str = ep.get("Endpoint", "")
+            display = (ep.get("DisplayName") or "").upper()
+
+            # Extract port from "ip:port" or bare "port"
+            if ":" in endpoint_str:
+                _, port_str = endpoint_str.rsplit(":", 1)
+            else:
+                port_str = endpoint_str
+
+            try:
+                port = int(port_str)
+            except ValueError:
+                continue
+
+            proto = "tcp" if "TCP" in display else "udp"
+            key = (port, proto)
+            if key not in seen:
+                seen.add(key)
+                ports.append({"host_port": port, "protocol": proto})
+        return ports
+
     def resolve_container_name(self, container_name: str, instances: Optional[dict] = None) -> str:
-        """
-        Returns the AMP friendly name for a container if one can be matched,
-        otherwise returns the container name unchanged.
-        """
         if instances is None:
             instances = self.get_instances()
         for amp_name in instances:

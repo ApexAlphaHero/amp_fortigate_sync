@@ -74,14 +74,25 @@ def cmd_query_amp(cfg: dict):
         print("No running containers found.")
         return
 
-    print(f"{'CONTAINER':<30} {'AMP INSTANCE':<30} {'PORTS'}")
-    print("-" * 80)
+    print(f"{'CONTAINER':<30} {'AMP INSTANCE':<30} {'PORTS':<25} {'SOURCE'}")
+    print("-" * 95)
     for c in containers:
         amp_label = amp.resolve_container_name(c["name"], amp_instances) if amp else c["name"]
-        ports_str = ", ".join(
-            f"{p['host_port']}/{p['protocol']}" for p in c["ports"]
-        ) or "(none)"
-        print(f"{c['name']:<30} {amp_label:<30} {ports_str}")
+
+        docker_ports = c["ports"]
+        amp_ports = amp_instances.get(amp_label, {}).get("ports", []) if amp else []
+
+        if docker_ports:
+            ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in docker_ports)
+            source = "docker"
+        elif amp_ports:
+            ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in amp_ports)
+            source = "amp"
+        else:
+            ports_str = "(none)"
+            source = ""
+
+        print(f"{c['name']:<30} {amp_label:<30} {ports_str:<25} {source}")
 
     if not amp:
         print("\n(AMP not configured — showing Docker container names only)")

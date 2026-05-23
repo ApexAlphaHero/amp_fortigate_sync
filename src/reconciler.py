@@ -45,6 +45,15 @@ class Reconciler:
         current_containers = {c["id"]: c for c in self._docker.get_running_containers()}
         amp_instances = self._amp.get_instances() if self._amp else {}
 
+        # Merge AMP port info into containers that Docker reports as having none
+        for c in current_containers.values():
+            if not c["ports"]:
+                label = self._resolve_label(c, amp_instances)
+                amp_ports = amp_instances.get(label, {}).get("ports", [])
+                if amp_ports:
+                    logger.debug("Using AMP ports for %s: %s", c["name"], amp_ports)
+                    c["ports"] = amp_ports
+
         # Pull live [amp-sync]-tagged objects from FortiGate
         live_vips = {v["name"]: v for v in self._fg.get_managed_vips()}
         live_services = {s["name"]: s for s in self._fg.get_managed_service_objects()}
