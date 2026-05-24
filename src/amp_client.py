@@ -29,7 +29,6 @@ class AMPClient:
                     "password": self._password,
                     "token": "",
                     "rememberMe": False,
-                    "SESSIONID": "",
                 },
                 timeout=5,
             )
