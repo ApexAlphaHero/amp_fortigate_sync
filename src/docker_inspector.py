@@ -1,4 +1,6 @@
+import glob
 import logging
+import os
 from typing import Optional
 
 import docker
@@ -26,26 +28,28 @@ class DockerInspector:
 
         result = []
         for c in containers:
-            host_net = self._is_host_network(c)
-            ports = self._extract_ports_host_net(c) if host_net else self._extract_ports_bridge(c.ports)
-            if host_net and not ports:
-                logger.debug("%s uses host networking but has no ExposedPorts", c.name)
+            if self._is_host_network(c):
+                ports = self._get_ports_from_proc(c)
+                if not ports:
+                    ports = self._extract_ports_host_net(c)
+            else:
+                ports = self._extract_ports_bridge(c.ports)
+
             result.append({
                 "id": c.id,
                 "name": c.name,
                 "image": c.image.tags[0] if c.image.tags else c.image.short_id,
                 "ports": ports,
-                "host_network": host_net,
+                "host_network": self._is_host_network(c),
             })
         return result
 
-    @staticmethod
-    def _is_host_network(container) -> bool:
-        return container.attrs.get("HostConfig", {}).get("NetworkMode", "") == "host"
+    # ------------------------------------------------------------------
+    # Port extraction methods
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _extract_ports_bridge(port_bindings: dict) -> list[dict]:
-        """Extract ports from containers using bridge/mapped networking (-p flag)."""
         ports = []
         for container_port, bindings in (port_bindings or {}).items():
             if bindings is None:
@@ -61,15 +65,10 @@ class DockerInspector:
 
     @staticmethod
     def _extract_ports_host_net(container) -> list[dict]:
-        """Extract ports from host-network containers via their ExposedPorts config.
-
-        With --network host the container shares the host's network stack, so
-        there are no Docker port mappings. The container port IS the host port.
-        """
+        """Fallback: read ExposedPorts from image config."""
         exposed = container.attrs.get("Config", {}).get("ExposedPorts") or {}
         ports = []
         for port_proto in exposed:
-            # format is "8080/tcp" or "27015/udp"
             if "/" in port_proto:
                 port_str, proto = port_proto.split("/", 1)
             else:
@@ -77,8 +76,91 @@ class DockerInspector:
             try:
                 ports.append({"host_port": int(port_str), "protocol": proto})
             except ValueError:
-                logger.warning("Could not parse exposed port: %s", port_proto)
+                pass
         return ports
+
+    @staticmethod
+    def _get_ports_from_proc(container) -> list[dict]:
+        """Read listening ports directly from /proc for the container's process tree.
+
+        Works for host-network containers where Docker reports no port mappings.
+        Requires root (or CAP_SYS_PTRACE) to read /proc/{pid}/fd symlinks.
+        """
+        pid = container.attrs.get("State", {}).get("Pid", 0)
+        if not pid:
+            return []
+
+        # BFS to collect all PIDs in the container's process tree
+        all_pids: set[int] = set()
+        queue = [pid]
+        while queue:
+            current = queue.pop(0)
+            if current in all_pids:
+                continue
+            all_pids.add(current)
+            for status_path in glob.glob("/proc/[0-9]*/status"):
+                try:
+                    cpid = int(status_path.split("/")[2])
+                    with open(status_path) as f:
+                        for line in f:
+                            if line.startswith("PPid:"):
+                                if int(line.split()[1]) == current and cpid not in all_pids:
+                                    queue.append(cpid)
+                                break
+                except (ValueError, OSError):
+                    pass
+
+        # Collect socket inodes owned by those PIDs
+        socket_inodes: set[str] = set()
+        for p in all_pids:
+            try:
+                for fd_link in glob.glob(f"/proc/{p}/fd/*"):
+                    try:
+                        target = os.readlink(fd_link)
+                        if target.startswith("socket:["):
+                            socket_inodes.add(target[8:-1])
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+
+        if not socket_inodes:
+            logger.debug("No socket inodes found for container %s (pid %d) — may need root", container.name, pid)
+            return []
+
+        # Cross-reference with /proc/net/tcp|udp to get listening ports
+        ports: list[dict] = []
+        seen: set[tuple] = set()
+
+        for proto, net_file, listen_state in [
+            ("tcp", "/proc/net/tcp",  "0A"),
+            ("tcp", "/proc/net/tcp6", "0A"),
+            ("udp", "/proc/net/udp",  None),
+            ("udp", "/proc/net/udp6", None),
+        ]:
+            try:
+                with open(net_file) as f:
+                    for line in f.readlines()[1:]:
+                        parts = line.split()
+                        if len(parts) < 10:
+                            continue
+                        if listen_state and parts[3] != listen_state:
+                            continue
+                        inode = parts[9]
+                        if inode not in socket_inodes:
+                            continue
+                        port = int(parts[1].split(":")[1], 16)
+                        if port > 0 and (port, proto) not in seen:
+                            seen.add((port, proto))
+                            ports.append({"host_port": port, "protocol": proto})
+            except OSError:
+                pass
+
+        return ports
+
+    @staticmethod
+    def _is_host_network(container) -> bool:
+        return container.attrs.get("HostConfig", {}).get("NetworkMode", "") == "host"
 
     def listen_events(self):
         """Generator that yields Docker start/stop events as dicts."""
