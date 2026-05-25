@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from amp_client import AMPClient
 from docker_inspector import DockerInspector
 from fortigate_client import FortigateClient
-from reconciler import _obj_name, _safe_name, _group_consecutive_ports, _port_range_str
+from reconciler import _obj_name, _safe_name, _group_consecutive_ports, _port_range_str, _policy_name
 from state_manager import StateManager
 
 
@@ -188,11 +188,12 @@ def cmd_list_instances(cfg: dict):
     )
     running_set = {c["name"] for c in inspector.get_all_containers() if c["status"] == "running"}
 
-    print(f"\n{'AMP INSTANCE':<32} {'PORTS':<12} {'PROTO':<6} {'VIP / RULE NAME':<50} {'POLICY ID'}")
-    print("-" * 115)
+    print(f"\n{'AMP INSTANCE':<32} {'PORTS':<12} {'PROTO':<6} {'VIP / RULE NAME':<50} {'POLICY'}")
+    print("-" * 120)
     for instance_name, info in sorted(amp_instances.items()):
         saved = state.get(instance_name, {})
-        policy_ids = saved.get("policy_ids", [])
+        policy_id = saved.get("policy_id") or saved.get("policy_ids", [None])[0]
+        pol_name = _policy_name(instance_name)
         running = f"AMP_{instance_name}" in running_set
 
         if not info["ports"]:
@@ -202,11 +203,11 @@ def cmd_list_instances(cfg: dict):
 
         groups = _group_consecutive_ports(info["ports"])
         for i, g in enumerate(groups):
-            rule_name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
+            vip_name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
             ports_label = _port_range_str(g["start_port"], g["end_port"])
-            pid = str(policy_ids[i]) if i < len(policy_ids) else "?"
             prefix = instance_name if i == 0 else ""
-            print(f"{prefix:<32} {ports_label:<12} {g['protocol']:<6} {rule_name:<50} {pid}")
+            pol_col = f"{pol_name} (id:{policy_id})" if i == 0 else "↑"
+            print(f"{prefix:<32} {ports_label:<12} {g['protocol']:<6} {vip_name:<50} {pol_col}")
     print()
 
 
@@ -238,7 +239,7 @@ def cmd_dry_run(cfg: dict):
         for g in _group_consecutive_ports(info["ports"]):
             name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
             port_range = _port_range_str(g["start_port"], g["end_port"])
-            expected.append({"name": name, "port_range": port_range, "proto": g["protocol"], "running": running})
+            expected.append({"instance": instance_name, "name": name, "port_range": port_range, "proto": g["protocol"], "running": running})
 
     # Fetch existing amp-sync rules from FortiGate
     try:
@@ -260,43 +261,56 @@ def cmd_dry_run(cfg: dict):
     print(f"\n{'ACTION':<8} {'STATUS':<8} {'TYPE':<16} {'NAME'}")
     print("-" * 95)
 
-    for r in sorted(expected, key=lambda x: x["name"]):
-        desired_status = "enable" if r["running"] else "disable"
-        exists_vip = r["name"] in live_vip_names
-        exists_svc = r["name"] in live_svc_names
-        exists_pol = r["name"] in live_policies
+    # Group expected rules by instance for display
+    by_instance: dict[str, list[dict]] = {}
+    for r in expected:
+        by_instance.setdefault(r["instance"], []).append(r)
 
-        vip_action  = "exists" if exists_vip else "CREATE"
-        svc_action  = "exists" if exists_svc else "CREATE"
-        if exists_pol:
-            current_status = live_policies[r["name"]].get("status", "enable")
-            pol_action = "UPDATE" if current_status != desired_status else "exists"
+    for instance_name in sorted(by_instance):
+        groups = by_instance[instance_name]
+        running = groups[0]["running"]
+        desired_status = "enable" if running else "disable"
+        pol_name = _policy_name(instance_name)
+
+        for r in groups:
+            vip_action = "exists" if r["name"] in live_vip_names else "CREATE"
+            svc_action = "exists" if r["name"] in live_svc_names else "CREATE"
+            vip_label = f"VIP  ({ext_ip}:{r['port_range']} → {host_ip}:{r['port_range']} {r['proto'].upper()})"
+            svc_label = f"Service Object  (port {r['port_range']}/{r['proto']})"
+            print(f"{vip_action:<8} {'':<8} {vip_label:<55} {r['name']}")
+            print(f"{svc_action:<8} {'':<8} {svc_label:<55} {r['name']}")
+
+        if pol_name in live_policies:
+            current_status = live_policies[pol_name].get("status", "enable")
+            current_dstaddr = {d["name"] for d in (live_policies[pol_name].get("dstaddr") or [])}
+            expected_vips = {r["name"] for r in groups}
+            pol_action = "UPDATE" if (current_status != desired_status or current_dstaddr != expected_vips) else "exists"
         else:
             pol_action = "CREATE"
-
-        vip_label = f"VIP  ({ext_ip}:{r['port_range']} → {host_ip}:{r['port_range']} {r['proto'].upper()})"
-        svc_label = f"Service Object  (port {r['port_range']}/{r['proto']})"
-        pol_label = f"Policy"
-
-        print(f"{vip_action:<8} {desired_status:<8} {vip_label:<55} {r['name']}")
-        print(f"{svc_action:<8} {'':<8} {svc_label:<55} {r['name']}")
-        print(f"{pol_action:<8} {'':<8} {pol_label:<55} {r['name']}")
+        vip_count = len(groups)
+        print(f"{pol_action:<8} {desired_status:<8} {'Policy  (' + str(vip_count) + ' VIP' + ('s' if vip_count != 1 else '') + ')':<55} {pol_name}")
         print()
 
     if to_delete:
         for name in sorted(to_delete):
-            print(f"{'DELETE':<8} {'—':<8} {'VIP + Service + Policy':<55} {name}")
+            print(f"{'DELETE':<8} {'—':<8} {'VIP + Service Object':<55} {name}")
+        # Orphan policies (old per-port names no longer exist as instance policies)
+        orphan_policies = set(live_policies) - {_policy_name(n) for n in by_instance}
+        for name in sorted(orphan_policies):
+            print(f"{'DELETE':<8} {'—':<8} {'Policy':<55} {name}")
         print()
 
     if not fw_reachable:
         return
-    creates = sum(1 for r in expected if r["name"] not in live_vip_names)
-    updates = sum(1 for r in expected
-                  if r["name"] in live_policies
-                  and live_policies[r["name"]].get("status") != ("enable" if r["running"] else "disable"))
+    vip_creates = sum(1 for r in expected if r["name"] not in live_vip_names)
+    pol_creates = sum(1 for inst in by_instance if _policy_name(inst) not in live_policies)
+    pol_updates = sum(1 for inst, grps in by_instance.items()
+                      if _policy_name(inst) in live_policies and (
+                          live_policies[_policy_name(inst)].get("status") != ("enable" if grps[0]["running"] else "disable")
+                          or {d["name"] for d in (live_policies[_policy_name(inst)].get("dstaddr") or [])} != {r["name"] for r in grps}
+                      ))
     deletes = len(to_delete)
-    exists = len(expected) - creates - updates
-    print(f"Summary: {creates} to create, {updates} to update status, {deletes} to delete, {exists} unchanged")
+    print(f"Summary: {vip_creates} VIPs to create, {pol_creates} policies to create, {pol_updates} policies to update, {deletes} VIPs to delete")
 
 
 # ---------------------------------------------------------------------------

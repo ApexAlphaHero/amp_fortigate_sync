@@ -130,8 +130,8 @@ class FortigateClient:
     def create_policy(
         self,
         name: str,
-        vip_name: str,
-        service_obj_name: str,
+        vip_names: list[str],
+        service_obj_names: list[str],
         status: str = "enable",
         ssl_ssh_profile: Optional[str] = None,
     ) -> dict:
@@ -140,20 +140,24 @@ class FortigateClient:
             "srcintf": [{"name": "any"}],
             "dstintf": [{"name": "any"}],
             "srcaddr": [{"name": "all"}],
-            "dstaddr": [{"name": vip_name}],
-            "service": [{"name": service_obj_name}],
+            "dstaddr": [{"name": n} for n in vip_names],
+            "service": [{"name": n} for n in service_obj_names],
             "action": "accept",
             "status": status,
         }
         if ssl_ssh_profile:
             payload["ssl-ssh-profile"] = ssl_ssh_profile
             payload["inspection-mode"] = "flow"
-        logger.info("Creating policy: %s (vip=%s, svc=%s, status=%s)", name, vip_name, service_obj_name, status)
+        logger.info("Creating policy: %s (vips=%s, status=%s)", name, vip_names, status)
         return self._request("POST", "/api/v2/cmdb/firewall/policy/", json=payload)
 
-    def update_policy_status(self, policy_id: int, status: str):
-        logger.info("Setting policy %s status: %s", policy_id, status)
-        self._request("PUT", f"/api/v2/cmdb/firewall/policy/{policy_id}", json={"status": status})
+    def update_policy(self, policy_id: int, vip_names: list[str], service_obj_names: list[str], status: str):
+        logger.info("Updating policy %s (vips=%s, status=%s)", policy_id, vip_names, status)
+        self._request("PUT", f"/api/v2/cmdb/firewall/policy/{policy_id}", json={
+            "dstaddr": [{"name": n} for n in vip_names],
+            "service": [{"name": n} for n in service_obj_names],
+            "status": status,
+        })
 
     def delete_policy(self, policy_id: int):
         logger.info("Deleting policy id: %s", policy_id)
