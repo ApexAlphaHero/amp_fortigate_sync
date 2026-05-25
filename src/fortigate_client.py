@@ -218,6 +218,7 @@ class FortigateClient:
             "PUT",
             f"/api/v2/cmdb/firewall/policy/{policy_id}",
             params={"action": "move", "where": "after", "neighbor": str(after_id)},
+            json={},
         )
 
     def delete_policy(self, policy_id: int):
