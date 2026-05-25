@@ -33,7 +33,7 @@ class FortigateClient:
         url = self._url(path)
         params = kwargs.pop("params", {})
         if self._vdom:
-            params = {"vdom": self._vdom, **params}
+            params = {**params, "vdom": self._vdom}
         for attempt in range(_MAX_RETRIES):
             try:
                 resp = self._session.request(
