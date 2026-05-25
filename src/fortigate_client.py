@@ -134,21 +134,25 @@ class FortigateClient:
         name: str,
         vip_name: str,
         service_obj_name: str,
+        status: str = "enable",
     ) -> dict:
-        srcintf = [{"name": "any"}]
         payload = {
             "name": name,
-            "srcintf": srcintf,
+            "srcintf": [{"name": "any"}],
             "dstintf": [{"name": "any"}],
             "srcaddr": [{"name": "all"}],
             "dstaddr": [{"name": vip_name}],
             "service": [{"name": service_obj_name}],
             "action": "accept",
-            "status": "enable",
+            "status": status,
             "comments": _SYNC_TAG,
         }
-        logger.info("Creating policy: %s (vip=%s, svc=%s)", name, vip_name, service_obj_name)
+        logger.info("Creating policy: %s (vip=%s, svc=%s, status=%s)", name, vip_name, service_obj_name, status)
         return self._request("POST", "/api/v2/cmdb/firewall/policy/", json=payload)
+
+    def update_policy_status(self, policy_id: int, status: str):
+        logger.info("Setting policy %s status: %s", policy_id, status)
+        self._request("PUT", f"/api/v2/cmdb/firewall/policy/{policy_id}", json={"status": status})
 
     def delete_policy(self, policy_id: int):
         logger.info("Deleting policy id: %s", policy_id)

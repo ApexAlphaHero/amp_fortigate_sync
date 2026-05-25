@@ -171,43 +171,39 @@ def cmd_query_fw(cfg: dict):
 
 
 def cmd_list_instances(cfg: dict):
-    """List AMP instances alongside their expected firewall rule names."""
-    docker_cfg = cfg.get("docker", {})
-    inspector = DockerInspector(
-        socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
-        label_filter=docker_cfg.get("label_filter") or None,
-    )
+    """List AMP instances alongside their expected firewall rule names and policy IDs."""
     amp = _make_amp(cfg)
     amp_instances = amp.get_instances() if amp else {}
 
-    # Also load SQLite state for policy IDs
     db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
     state: dict = {}
     if Path(db_path).exists():
         sm = StateManager(db_path=db_path)
         state = sm.load_all()
-    state_by_name = {v["name"]: v for v in state.values()}
 
-    containers = inspector.get_running_containers()
-    if not containers:
-        print("No running containers found.")
-        return
+    docker_cfg = cfg.get("docker", {})
+    inspector = DockerInspector(
+        socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
+        label_filter=docker_cfg.get("label_filter") or None,
+    )
+    running_set = {c["name"] for c in inspector.get_all_containers() if c["status"] == "running"}
 
-    print(f"\n{'AMP INSTANCE / CONTAINER':<32} {'PORT':<8} {'PROTO':<6} {'VIP / RULE NAME':<50} {'POLICY ID'}")
+    print(f"\n{'AMP INSTANCE':<32} {'PORT':<8} {'PROTO':<6} {'VIP / RULE NAME':<50} {'POLICY ID'}")
     print("-" * 110)
-    for c in containers:
-        label = amp.resolve_container_name(c["name"], amp_instances) if amp else c["name"]
-        saved = state_by_name.get(label, {})
+    for instance_name, info in sorted(amp_instances.items()):
+        saved = state.get(instance_name, {})
         policy_ids = saved.get("policy_ids", [])
+        running = f"AMP_{instance_name}" in running_set
 
-        if not c["ports"]:
-            print(f"{label:<32} {'—':<8} {'—':<6} {'(no exposed ports)'}")
+        if not info["ports"]:
+            status = "running" if running else "stopped"
+            print(f"{instance_name:<32} {'—':<8} {'—':<6} {'(no ports)':<50} ({status})")
             continue
 
-        for i, p in enumerate(c["ports"]):
-            rule_name = _obj_name(label, p["host_port"], p["protocol"])
+        for i, p in enumerate(info["ports"]):
+            rule_name = _obj_name(instance_name, p["host_port"], p["protocol"])
             pid = str(policy_ids[i]) if i < len(policy_ids) else "?"
-            prefix = label if i == 0 else ""
+            prefix = instance_name if i == 0 else ""
             print(f"{prefix:<32} {p['host_port']:<8} {p['protocol']:<6} {rule_name:<50} {pid}")
     print()
 
@@ -226,31 +222,31 @@ def cmd_dry_run(cfg: dict):
         socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
         label_filter=docker_cfg.get("label_filter") or None,
     )
-    containers = inspector.get_running_containers()
+    running_set = {c["name"] for c in inspector.get_all_containers() if c["status"] == "running"}
 
     fg = _make_fg(cfg)
     fg_cfg = cfg["fortigate"]
     ext_ip = fg_cfg.get("ext_ip", "<ext_ip>")
     host_ip = cfg.get("host_ip", "") or "<auto-detected>"
 
-    # Build expected rules from running containers
+    # Build expected rules from ALL AMP instances
     expected: list[dict] = []
-    for c in containers:
-        label = amp.resolve_container_name(c["name"], amp_instances) if amp else c["name"]
-        ports = amp_instances.get(label, {}).get("ports", []) or c["ports"]
-        for p in ports:
-            name = _obj_name(label, p["host_port"], p["protocol"])
-            expected.append({"name": name, "port": p["host_port"], "proto": p["protocol"], "label": label})
+    for instance_name, info in amp_instances.items():
+        running = f"AMP_{instance_name}" in running_set
+        for p in info["ports"]:
+            name = _obj_name(instance_name, p["host_port"], p["protocol"])
+            expected.append({"name": name, "port": p["host_port"], "proto": p["protocol"], "running": running})
 
     # Fetch existing amp-sync rules from FortiGate
     try:
         live_vip_names = {v["name"] for v in fg.get_managed_vips()}
         live_svc_names = {s["name"] for s in fg.get_managed_service_objects()}
-        live_pol_names = {p["name"] for p in fg.get_managed_policies()}
+        live_policies = {p["name"]: p for p in fg.get_managed_policies()}
         fw_reachable = True
     except Exception as e:
         print(f"WARNING: Could not reach FortiGate ({e}) — showing all rules as NEW\n")
-        live_vip_names = live_svc_names = live_pol_names = set()
+        live_vip_names = live_svc_names = set()
+        live_policies = {}
         fw_reachable = False
 
     expected_names = {r["name"] for r in expected}
@@ -258,34 +254,35 @@ def cmd_dry_run(cfg: dict):
 
     print(f"\next_ip : {ext_ip}")
     print(f"host_ip: {host_ip}")
-    print(f"\n{'ACTION':<8} {'RULE NAME':<45} {'PORT':<8} {'PROTO':<6} {'OBJECTS'}")
-    print("-" * 95)
+    print(f"\n{'ACTION':<8} {'STATUS':<8} {'RULE NAME':<45} {'PORT':<8} {'PROTO'}")
+    print("-" * 85)
 
     for r in sorted(expected, key=lambda x: x["name"]):
+        desired_status = "enable" if r["running"] else "disable"
         exists_vip = r["name"] in live_vip_names
         exists_svc = r["name"] in live_svc_names
-        exists_pol = r["name"] in live_pol_names
+        exists_pol = r["name"] in live_policies
         if exists_vip and exists_svc and exists_pol:
-            action = "exists"
+            current_status = live_policies[r["name"]].get("status", "enable")
+            action = "UPDATE" if current_status != desired_status else "exists"
         else:
-            missing = []
-            if not exists_vip: missing.append("VIP")
-            if not exists_svc: missing.append("svc")
-            if not exists_pol: missing.append("policy")
             action = "CREATE"
-        objects = f"{ext_ip}:{r['port']} → {host_ip}:{r['port']}"
-        print(f"{action:<8} {r['name']:<45} {r['port']:<8} {r['proto']:<6} {objects}")
+        print(f"{action:<8} {desired_status:<8} {r['name']:<45} {r['port']:<8} {r['proto']}")
 
     if to_delete:
         print()
         for name in sorted(to_delete):
-            print(f"{'DELETE':<8} {name}")
+            print(f"{'DELETE':<8} {'—':<8} {name}")
 
     if not fw_reachable:
         return
     creates = sum(1 for r in expected if r["name"] not in live_vip_names)
+    updates = sum(1 for r in expected
+                  if r["name"] in live_policies
+                  and live_policies[r["name"]].get("status") != ("enable" if r["running"] else "disable"))
     deletes = len(to_delete)
-    print(f"\nSummary: {creates} to create, {deletes} to delete, {len(expected) - creates} already exist")
+    exists = len(expected) - creates - updates
+    print(f"\nSummary: {creates} to create, {updates} to update status, {deletes} to delete, {exists} unchanged")
 
 
 # ---------------------------------------------------------------------------
