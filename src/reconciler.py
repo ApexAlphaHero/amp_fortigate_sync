@@ -15,8 +15,8 @@ def _ports_key(ports: list[dict]) -> frozenset:
     return frozenset((p["host_port"], p["protocol"]) for p in ports)
 
 
-def _safe_name(raw: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)[:63]
+def _safe_name(raw: str, max_len: int = 79) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)[:max_len]
 
 
 def _obj_name(label: str, start_port: int, end_port: int, proto: str) -> str:
@@ -26,7 +26,7 @@ def _obj_name(label: str, start_port: int, end_port: int, proto: str) -> str:
 
 
 def _policy_name(label: str) -> str:
-    return _safe_name(f"amp-sync-{label}")
+    return _safe_name(f"amp-sync-{label}", max_len=35)
 
 
 def _port_range_str(start: int, end: int) -> str:

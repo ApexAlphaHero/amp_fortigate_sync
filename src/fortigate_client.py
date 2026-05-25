@@ -191,6 +191,7 @@ class FortigateClient:
             "srcaddr": [{"name": "all"}],
             "dstaddr": [{"name": n} for n in vip_names],
             "service": [{"name": n} for n in service_obj_names],
+            "schedule": "always",
             "action": "accept",
             "status": status,
         }
