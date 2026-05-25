@@ -225,9 +225,9 @@ class Reconciler:
                 ssl_ssh_profile=self._ssl_ssh_profile,
                 dstintf=self._dstintf,
             )
-            policy_id = (resp.get("results") or [{}])[0].get("mkey")
+            policy_id = resp.get("mkey")
             if policy_id is not None and self._policy_insert_after is not None:
-                self._fg.move_policy_after(policy_id, self._policy_insert_after)
+                self._fg.move_policy_after(int(policy_id), self._policy_insert_after)
             result = "created"
         else:
             current = live_policies[inst_name]
