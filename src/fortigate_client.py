@@ -159,6 +159,15 @@ class FortigateClient:
             "status": status,
         })
 
+    def move_policy_after(self, policy_id: int, after_id: int):
+        """Move a policy to sit immediately after another policy in the list."""
+        logger.info("Moving policy %s to after policy %s", policy_id, after_id)
+        self._request(
+            "PUT",
+            f"/api/v2/cmdb/firewall/policy/{policy_id}",
+            params={"action": "move", "where": "after", "neighbor": str(after_id)},
+        )
+
     def delete_policy(self, policy_id: int):
         logger.info("Deleting policy id: %s", policy_id)
         self._delete(f"/api/v2/cmdb/firewall/policy/{policy_id}", f"policy {policy_id}")

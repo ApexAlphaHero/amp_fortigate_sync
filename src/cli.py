@@ -79,6 +79,8 @@ def _make_reconciler(cfg: dict):
         host_ip=host_ip,
         amp_client=amp,
     )
+    reconciler._ssl_ssh_profile = fg_cfg.get("ssl_ssh_profile") or None
+    reconciler._policy_insert_after = fg_cfg.get("policy_insert_after") or None
     return reconciler
 
 

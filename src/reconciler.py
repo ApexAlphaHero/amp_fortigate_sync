@@ -74,6 +74,7 @@ class Reconciler:
         self._host_ip = host_ip or self._detect_host_ip()
         self._amp = amp_client
         self._ssl_ssh_profile: Optional[str] = None
+        self._policy_insert_after: Optional[int] = None
 
     def reconcile(self) -> dict:
         amp_instances = self._amp.get_instances() if self._amp else {}
@@ -202,6 +203,8 @@ class Reconciler:
                 ssl_ssh_profile=self._ssl_ssh_profile,
             )
             policy_id = (resp.get("results") or [{}])[0].get("mkey")
+            if policy_id is not None and self._policy_insert_after is not None:
+                self._fg.move_policy_after(policy_id, self._policy_insert_after)
             result = "created"
         else:
             current = live_policies[pol_name]
