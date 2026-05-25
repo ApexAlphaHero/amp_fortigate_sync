@@ -83,6 +83,7 @@ def _make_reconciler(cfg: dict):
     reconciler._policy_insert_after = fg_cfg.get("policy_insert_after") or None
     reconciler._service_category = fg_cfg.get("service_category") or None
     reconciler._dstintf = fg_cfg.get("dstintf") or "any"
+    reconciler._srcaddr = fg_cfg.get("srcaddr") or ["all"]
     return reconciler
 
 

@@ -77,6 +77,7 @@ class Reconciler:
         self._policy_insert_after: Optional[int] = None
         self._service_category: Optional[str] = None
         self._dstintf: str = "any"
+        self._srcaddr: list[str] = ["all"]
 
     def reconcile(self) -> dict:
         if self._service_category:
@@ -224,6 +225,7 @@ class Reconciler:
                 status=desired_status,
                 ssl_ssh_profile=self._ssl_ssh_profile,
                 dstintf=self._dstintf,
+                srcaddr=self._srcaddr,
             )
             policy_id = resp.get("mkey")
             if policy_id is not None and self._policy_insert_after is not None:

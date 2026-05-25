@@ -19,6 +19,7 @@ fortigate:
   vdom: "root"           # VDOM name — set to null if VDOMs are not enabled
   ssl_verify: true
   dstintf: "any"           # Outgoing interface for created policies (e.g. "wan1", "port1")
+  srcaddr: ["all"]         # Source address objects applied to created policies
   ssl_ssh_profile: "Games"       # SSL/SSH inspection profile applied to created policies (set to null or remove to disable)
   policy_insert_after: null      # Policy ID to insert new rules after (null = system default position)
   service_category: "amp-sync"     # Category assigned to created service objects (null to leave uncategorized)
