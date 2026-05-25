@@ -135,6 +135,7 @@ class FortigateClient:
         vip_name: str,
         service_obj_name: str,
         status: str = "enable",
+        ssl_ssh_profile: Optional[str] = None,
     ) -> dict:
         payload = {
             "name": name,
@@ -147,6 +148,9 @@ class FortigateClient:
             "status": status,
             "comments": _SYNC_TAG,
         }
+        if ssl_ssh_profile:
+            payload["ssl-ssh-profile"] = ssl_ssh_profile
+            payload["inspection-mode"] = "flow"
         logger.info("Creating policy: %s (vip=%s, svc=%s, status=%s)", name, vip_name, service_obj_name, status)
         return self._request("POST", "/api/v2/cmdb/firewall/policy/", json=payload)
 

@@ -203,6 +203,7 @@ def main():
         host_ip=host_ip,
         amp_client=amp_client,
     )
+    _reconciler._ssl_ssh_profile = fg_cfg.get("ssl_ssh_profile") or None
 
     _sync_flag = _sync_flag_path(cfg)
     _status["sync_enabled"] = _sync_flag.exists()
@@ -222,7 +223,7 @@ def main():
 
     threading.Thread(
         target=_poll_loop,
-        args=(_reconciler, _docker_inspector, cfg.get("poll_interval_seconds", 30)),
+        args=(_reconciler, _docker_inspector, cfg.get("poll_interval_minutes", 5) * 60),
         daemon=True,
         name="poll-loop",
     ).start()

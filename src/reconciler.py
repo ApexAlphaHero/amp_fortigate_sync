@@ -39,6 +39,7 @@ class Reconciler:
         self._ext_ip = ext_ip
         self._host_ip = host_ip or self._detect_host_ip()
         self._amp = amp_client
+        self._ssl_ssh_profile: Optional[str] = None
 
     def reconcile(self) -> dict:
         amp_instances = self._amp.get_instances() if self._amp else {}
@@ -136,7 +137,8 @@ class Reconciler:
 
             if name not in live_policies:
                 resp = self._fg.create_policy(
-                    name=name, vip_name=name, service_obj_name=name, status=desired_status,
+                    name=name, vip_name=name, service_obj_name=name,
+                    status=desired_status, ssl_ssh_profile=self._ssl_ssh_profile,
                 )
                 pid = (resp.get("results") or [{}])[0].get("mkey")
                 if pid is not None:

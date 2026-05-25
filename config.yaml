@@ -16,12 +16,13 @@ fortigate:
   host: "https://192.168.1.1"   # FortiGate management IP/hostname
   ext_ip: ""                     # Public/WAN IP used as the VIP external address
   ssl_verify: true
+  ssl_ssh_profile: "Games"       # SSL/SSH inspection profile applied to created policies
 
 # host_ip: auto-detected from the default network route (outbound LAN IP).
 # Override here only if auto-detection picks the wrong interface.
 # host_ip: "192.168.1.100"
 
-poll_interval_seconds: 30
+poll_interval_minutes: 5
 log_level: "INFO"
 
 state_db_path: "/var/lib/amp-fw-sync/state.db"
