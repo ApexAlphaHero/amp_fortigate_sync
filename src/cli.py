@@ -5,6 +5,7 @@ Usage:
   python src/cli.py query-amp
   python src/cli.py query-fw
   python src/cli.py list-instances
+  python src/cli.py sync-now
   python src/cli.py enable-sync
   python src/cli.py disable-sync
 """
@@ -54,6 +55,31 @@ def _load_config() -> dict:
     cfg["amp"]["password"] = os.environ.get("AMP_PASSWORD", cfg["amp"].get("password", ""))
     cfg.setdefault("fortigate", {})["token"] = os.environ.get("FORTIGATE_API_TOKEN", cfg["fortigate"].get("token", ""))
     return cfg
+
+
+def _make_reconciler(cfg: dict):
+    from reconciler import Reconciler
+    docker_cfg = cfg.get("docker", {})
+    inspector = DockerInspector(
+        socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
+        label_filter=docker_cfg.get("label_filter") or None,
+    )
+    fg_cfg = cfg["fortigate"]
+    fg = FortigateClient(host=fg_cfg["host"], token=fg_cfg["token"], ssl_verify=fg_cfg.get("ssl_verify", True))
+    amp = _make_amp(cfg)
+    db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
+    state = StateManager(db_path=db_path)
+    from reconciler import Reconciler as _R
+    host_ip = cfg.get("host_ip", "") or _R._detect_host_ip()
+    reconciler = Reconciler(
+        docker_inspector=inspector,
+        state_manager=state,
+        fortigate_client=fg,
+        ext_ip=fg_cfg.get("ext_ip", ""),
+        host_ip=host_ip,
+        amp_client=amp,
+    )
+    return reconciler
 
 
 def _make_fg(cfg: dict) -> FortigateClient:
@@ -203,6 +229,30 @@ def _notify_service(endpoint: str):
         pass
 
 
+def cmd_sync_now(cfg: dict):
+    """Trigger an immediate reconcile, bypassing the poll interval."""
+    flag = _sync_flag_path(cfg)
+    if not flag.exists():
+        print("WARNING: Sync is currently DISABLED. Running a one-off reconcile anyway.")
+
+    # Try the running service first for minimal disruption
+    try:
+        r = _requests.post("http://localhost:8000/sync/now", timeout=10)
+        if r.ok:
+            data = r.json()
+            stats = data.get("stats", {})
+            print(f"Reconcile complete: +{stats.get('added', 0)} added, -{stats.get('removed', 0)} removed, {stats.get('errors', 0)} errors")
+            return
+    except Exception:
+        pass
+
+    # Service not running — run reconcile directly
+    print("Service not running; reconciling directly...")
+    reconciler = _make_reconciler(cfg)
+    stats = reconciler.reconcile()
+    print(f"Reconcile complete: +{stats.get('added', 0)} added, -{stats.get('removed', 0)} removed, {stats.get('errors', 0)} errors")
+
+
 def cmd_enable_sync(cfg: dict):
     flag = _sync_flag_path(cfg)
     flag.parent.mkdir(parents=True, exist_ok=True)
@@ -232,6 +282,7 @@ def main():
     sub.add_parser("query-amp",      help="List AMP instances and their Docker container ports")
     sub.add_parser("query-fw",       help="List firewall rules created by this script ([amp-sync] tagged)")
     sub.add_parser("list-instances", help="List AMP instances alongside their expected rule names")
+    sub.add_parser("sync-now",       help="Trigger an immediate reconcile (bypasses poll interval)")
     sub.add_parser("enable-sync",    help="Enable firewall sync (creates flag file, triggers immediate reconcile)")
     sub.add_parser("disable-sync",   help="Disable firewall sync (removes flag file, no further FW changes)")
 
@@ -242,6 +293,7 @@ def main():
         "query-amp":      cmd_query_amp,
         "query-fw":       cmd_query_fw,
         "list-instances": cmd_list_instances,
+        "sync-now":       cmd_sync_now,
         "enable-sync":    cmd_enable_sync,
         "disable-sync":   cmd_disable_sync,
     }

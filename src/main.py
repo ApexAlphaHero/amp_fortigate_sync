@@ -74,6 +74,19 @@ def status():
     return {**_status, "sync_enabled": _sync_flag.exists() if _sync_flag else False}
 
 
+@app.post("/sync/now")
+def sync_now():
+    stats = {}
+    if _reconciler and _docker_inspector:
+        from reconciler import Reconciler
+        s = _reconciler.reconcile()
+        _status["last_reconcile"] = datetime.now(timezone.utc).isoformat()
+        _status["last_reconcile_stats"] = s
+        _status["container_count"] = len(_docker_inspector.get_running_containers())
+        stats = s
+    return {"stats": stats}
+
+
 @app.post("/sync/enable")
 def sync_enable():
     _sync_flag.touch()
