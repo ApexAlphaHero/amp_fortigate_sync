@@ -16,7 +16,7 @@ fortigate:
   host: "https://192.168.1.1"   # FortiGate management IP/hostname
   ext_ip: ""                     # Public/WAN IP used as the VIP external address
   ssl_verify: true
-  ssl_ssh_profile: "Games"       # SSL/SSH inspection profile applied to created policies
+  ssl_ssh_profile: "Games"       # SSL/SSH inspection profile applied to created policies (set to null or remove to disable)
 
 # host_ip: auto-detected from the default network route (outbound LAN IP).
 # Override here only if auto-detection picks the wrong interface.
