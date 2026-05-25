@@ -209,6 +209,7 @@ def main():
     _reconciler._ssl_ssh_profile = fg_cfg.get("ssl_ssh_profile") or None
     _reconciler._policy_insert_after = fg_cfg.get("policy_insert_after") or None
     _reconciler._service_category = fg_cfg.get("service_category") or None
+    _reconciler._dstintf = fg_cfg.get("dstintf") or "any"
 
     _sync_flag = _sync_flag_path(cfg)
     _status["sync_enabled"] = _sync_flag.exists()

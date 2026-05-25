@@ -183,11 +183,12 @@ class FortigateClient:
         service_obj_names: list[str],
         status: str = "enable",
         ssl_ssh_profile: Optional[str] = None,
+        dstintf: str = "any",
     ) -> dict:
         payload = {
             "name": name,
             "srcintf": [{"name": "any"}],
-            "dstintf": [{"name": "any"}],
+            "dstintf": [{"name": dstintf}],
             "srcaddr": [{"name": "all"}],
             "dstaddr": [{"name": n} for n in vip_names],
             "service": [{"name": n} for n in service_obj_names],
