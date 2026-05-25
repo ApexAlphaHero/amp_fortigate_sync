@@ -9,16 +9,17 @@ docker:
   label_filter: ""  # e.g. "amp-sync=true" — leave blank to watch all containers
 
 amp:
-  host: "http://localhost:8080"  # AMP web UI base URL
+  # Use the server's LAN IP — AMP blocks API auth from 127.0.0.1/localhost
+  host: "http://192.168.1.100:8080"
 
 fortigate:
-  host: "https://192.168.1.1"        # FortiGate management IP/hostname
-  ext_ip: ""                          # Public IP address used as the VIP external IP
+  host: "https://192.168.1.1"   # FortiGate management IP/hostname
+  ext_ip: ""                     # Public/WAN IP used as the VIP external address
   ssl_verify: true
 
-# Local IP of this server — used as the mapped (internal) IP in VIPs.
-# Leave blank to auto-detect from the default network route.
-host_ip: ""
+# host_ip: auto-detected from the default network route (outbound LAN IP).
+# Override here only if auto-detection picks the wrong interface.
+# host_ip: "192.168.1.100"
 
 poll_interval_seconds: 30
 log_level: "INFO"
