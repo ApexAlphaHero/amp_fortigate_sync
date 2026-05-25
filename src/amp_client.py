@@ -5,6 +5,8 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+_SKIP_ENDPOINTS = {"SFTP SERVER"}
+
 
 class AMPClient:
     def __init__(self, host: str, username: str, password: str):
@@ -72,7 +74,10 @@ class AMPClient:
             return None
 
     def get_instances(self) -> dict[str, dict]:
-        """Returns a mapping of AMP instance friendly name → metadata dict including ports."""
+        """Returns a mapping of AMP InstanceName → metadata dict including ports.
+
+        Keyed by InstanceName (unique) rather than FriendlyName (may collide).
+        """
         data = self._post("/API/ADSModule/GetInstances")
         if data is None:
             return {}
@@ -81,26 +86,39 @@ class AMPClient:
         entries = data if isinstance(data, list) else data.get("result", [])
         for entry in entries:
             for instance in entry.get("AvailableInstances", []):
-                name = instance.get("FriendlyName") or instance.get("InstanceName")
+                name = instance.get("InstanceName")
                 if not name:
                     continue
+                module = instance.get("ModuleName", "")
+                # Skip the ADS controller itself — it's not a game server
+                if module == "ADS":
+                    continue
+                ports = self._parse_endpoints(instance.get("ApplicationEndpoints", []))
                 instances[name] = {
                     "instance_id": instance.get("InstanceID"),
-                    "module": instance.get("ModuleName"),
+                    "module": module,
+                    "friendly_name": instance.get("FriendlyName"),
                     "running": instance.get("Running", False),
-                    "ports": self._parse_endpoints(instance.get("ApplicationEndpoints", [])),
+                    "ports": ports,
                 }
         return instances
 
     @staticmethod
     def _parse_endpoints(endpoints: list) -> list[dict]:
-        """Parse ApplicationEndpoints into [{host_port, protocol}] dicts."""
+        """Parse ApplicationEndpoints into [{host_port, protocol}] dicts.
+
+        Skips SFTP and other non-game endpoints.
+        Defaults to UDP when the display name doesn't specify a protocol,
+        which is correct for the majority of game servers.
+        """
         ports = []
         seen = set()
         for ep in endpoints:
-            endpoint_str = ep.get("Endpoint", "")
             display = (ep.get("DisplayName") or "").upper()
+            if display in _SKIP_ENDPOINTS:
+                continue
 
+            endpoint_str = ep.get("Endpoint", "")
             if ":" in endpoint_str:
                 _, port_str = endpoint_str.rsplit(":", 1)
             else:
@@ -119,9 +137,22 @@ class AMPClient:
         return ports
 
     def resolve_container_name(self, container_name: str, instances: Optional[dict] = None) -> str:
+        """Map a Docker container name to its AMP InstanceName.
+
+        Docker containers are typically named AMP_{InstanceName}, so we try
+        stripping that prefix first before falling back to substring matching.
+        """
         if instances is None:
             instances = self.get_instances()
-        for amp_name in instances:
-            if amp_name.lower() in container_name.lower() or container_name.lower() in amp_name.lower():
-                return amp_name
+
+        # Exact match after stripping the AMP_ prefix
+        clean = container_name.removeprefix("AMP_")
+        if clean in instances:
+            return clean
+
+        # Fallback: substring match (handles non-standard naming)
+        for instance_name in instances:
+            if instance_name.lower() in container_name.lower():
+                return instance_name
+
         return container_name

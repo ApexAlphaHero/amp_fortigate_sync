@@ -92,15 +92,15 @@ def cmd_query_amp(cfg: dict):
     for c in containers:
         amp_label = amp.resolve_container_name(c["name"], amp_instances) if amp else c["name"]
 
-        docker_ports = c["ports"]
         amp_ports = amp_instances.get(amp_label, {}).get("ports", []) if amp else []
+        docker_ports = c["ports"]
 
-        if docker_ports:
-            ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in docker_ports)
-            source = "docker"
-        elif amp_ports:
+        if amp_ports:
             ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in amp_ports)
             source = "amp"
+        elif docker_ports:
+            ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in docker_ports)
+            source = "docker"
         else:
             ports_str = "(none)"
             source = ""
