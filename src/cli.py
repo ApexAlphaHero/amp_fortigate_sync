@@ -126,7 +126,7 @@ def cmd_query_amp(cfg: dict):
     print("-" * 75)
     for name, info in sorted(amp_instances.items()):
         docker_name = f"AMP_{name}"
-        docker_status = docker_containers.get(docker_name, "no container")
+        docker_status = docker_containers.get(docker_name, "not running")
         ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in info["ports"]) or "(none)"
         print(f"{name:<30} {docker_status:<10} {ports_str}")
 
@@ -213,6 +213,82 @@ def cmd_list_instances(cfg: dict):
 
 
 # ---------------------------------------------------------------------------
+# Dry run
+# ---------------------------------------------------------------------------
+
+def cmd_dry_run(cfg: dict):
+    """Show what FortiGate rules would be created/deleted without making changes."""
+    amp = _make_amp(cfg)
+    amp_instances = amp.get_instances() if amp else {}
+
+    docker_cfg = cfg.get("docker", {})
+    inspector = DockerInspector(
+        socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
+        label_filter=docker_cfg.get("label_filter") or None,
+    )
+    containers = inspector.get_running_containers()
+
+    fg = _make_fg(cfg)
+    fg_cfg = cfg["fortigate"]
+    ext_ip = fg_cfg.get("ext_ip", "<ext_ip>")
+    host_ip = cfg.get("host_ip", "") or "<auto-detected>"
+
+    # Build expected rules from running containers
+    expected: list[dict] = []
+    for c in containers:
+        label = amp.resolve_container_name(c["name"], amp_instances) if amp else c["name"]
+        ports = amp_instances.get(label, {}).get("ports", []) or c["ports"]
+        for p in ports:
+            name = _obj_name(label, p["host_port"], p["protocol"])
+            expected.append({"name": name, "port": p["host_port"], "proto": p["protocol"], "label": label})
+
+    # Fetch existing amp-sync rules from FortiGate
+    try:
+        live_vip_names = {v["name"] for v in fg.get_managed_vips()}
+        live_svc_names = {s["name"] for s in fg.get_managed_service_objects()}
+        live_pol_names = {p["name"] for p in fg.get_managed_policies()}
+        fw_reachable = True
+    except Exception as e:
+        print(f"WARNING: Could not reach FortiGate ({e}) — showing all rules as NEW\n")
+        live_vip_names = live_svc_names = live_pol_names = set()
+        fw_reachable = False
+
+    expected_names = {r["name"] for r in expected}
+    to_delete = live_vip_names - expected_names
+
+    print(f"\next_ip : {ext_ip}")
+    print(f"host_ip: {host_ip}")
+    print(f"\n{'ACTION':<8} {'RULE NAME':<45} {'PORT':<8} {'PROTO':<6} {'OBJECTS'}")
+    print("-" * 95)
+
+    for r in sorted(expected, key=lambda x: x["name"]):
+        exists_vip = r["name"] in live_vip_names
+        exists_svc = r["name"] in live_svc_names
+        exists_pol = r["name"] in live_pol_names
+        if exists_vip and exists_svc and exists_pol:
+            action = "exists"
+        else:
+            missing = []
+            if not exists_vip: missing.append("VIP")
+            if not exists_svc: missing.append("svc")
+            if not exists_pol: missing.append("policy")
+            action = "CREATE"
+        objects = f"{ext_ip}:{r['port']} → {host_ip}:{r['port']}"
+        print(f"{action:<8} {r['name']:<45} {r['port']:<8} {r['proto']:<6} {objects}")
+
+    if to_delete:
+        print()
+        for name in sorted(to_delete):
+            print(f"{'DELETE':<8} {name}")
+
+    if not fw_reachable:
+        return
+    creates = sum(1 for r in expected if r["name"] not in live_vip_names)
+    deletes = len(to_delete)
+    print(f"\nSummary: {creates} to create, {deletes} to delete, {len(expected) - creates} already exist")
+
+
+# ---------------------------------------------------------------------------
 # Sync control
 # ---------------------------------------------------------------------------
 
@@ -282,6 +358,7 @@ def main():
     sub.add_parser("query-amp",      help="List AMP instances and their Docker container ports")
     sub.add_parser("query-fw",       help="List firewall rules created by this script ([amp-sync] tagged)")
     sub.add_parser("list-instances", help="List AMP instances alongside their expected rule names")
+    sub.add_parser("dry-run",        help="Show what rules would be created/deleted without making changes")
     sub.add_parser("sync-now",       help="Trigger an immediate reconcile (bypasses poll interval)")
     sub.add_parser("enable-sync",    help="Enable firewall sync (creates flag file, triggers immediate reconcile)")
     sub.add_parser("disable-sync",   help="Disable firewall sync (removes flag file, no further FW changes)")
@@ -293,6 +370,7 @@ def main():
         "query-amp":      cmd_query_amp,
         "query-fw":       cmd_query_fw,
         "list-instances": cmd_list_instances,
+        "dry-run":        cmd_dry_run,
         "sync-now":       cmd_sync_now,
         "enable-sync":    cmd_enable_sync,
         "disable-sync":   cmd_disable_sync,
