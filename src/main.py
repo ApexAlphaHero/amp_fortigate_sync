@@ -169,6 +169,7 @@ def main():
         host=fg_cfg["host"],
         token=fg_cfg["token"],
         ssl_verify=fg_cfg.get("ssl_verify", True),
+        vdom=fg_cfg.get("vdom") or None,
     )
 
     amp_cfg = cfg.get("amp", {})

@@ -13,9 +13,10 @@ _BACKOFF_BASE = 2.0
 
 
 class FortigateClient:
-    def __init__(self, host: str, token: str, ssl_verify: bool = True):
+    def __init__(self, host: str, token: str, ssl_verify: bool = True, vdom: Optional[str] = None):
         self._base = host.rstrip("/")
         self._verify = ssl_verify
+        self._vdom = vdom
         self._session = requests.Session()
         self._session.headers["Authorization"] = f"Bearer {token}"
         if not ssl_verify:
@@ -31,6 +32,8 @@ class FortigateClient:
     def _request(self, method: str, path: str, **kwargs) -> dict:
         url = self._url(path)
         params = kwargs.pop("params", {})
+        if self._vdom:
+            params = {"vdom": self._vdom, **params}
         for attempt in range(_MAX_RETRIES):
             try:
                 resp = self._session.request(

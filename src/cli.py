@@ -65,7 +65,7 @@ def _make_reconciler(cfg: dict):
         label_filter=docker_cfg.get("label_filter") or None,
     )
     fg_cfg = cfg["fortigate"]
-    fg = FortigateClient(host=fg_cfg["host"], token=fg_cfg["token"], ssl_verify=fg_cfg.get("ssl_verify", True))
+    fg = FortigateClient(host=fg_cfg["host"], token=fg_cfg["token"], ssl_verify=fg_cfg.get("ssl_verify", True), vdom=fg_cfg.get("vdom") or None)
     amp = _make_amp(cfg)
     db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
     state = StateManager(db_path=db_path)
@@ -91,6 +91,7 @@ def _make_fg(cfg: dict) -> FortigateClient:
         host=fg_cfg["host"],
         token=fg_cfg["token"],
         ssl_verify=fg_cfg.get("ssl_verify", True),
+        vdom=fg_cfg.get("vdom") or None,
     )
 
 
