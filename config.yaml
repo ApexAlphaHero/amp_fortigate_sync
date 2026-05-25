@@ -25,13 +25,3 @@ poll_interval_seconds: 30
 log_level: "INFO"
 
 state_db_path: "/var/lib/amp-fw-sync/state.db"
-
-# Per-instance port overrides — replaces what AMP reports for that instance.
-# Use when a game needs multiple protocols or AMP reports the wrong protocol.
-# instance_ports:
-#   Satisfactory01:
-#     - {port: 7777, protocol: tcp}
-#     - {port: 7777, protocol: udp}
-#   Satisfactory02:
-#     - {port: 7782, protocol: tcp}
-#     - {port: 7782, protocol: udp}

@@ -203,7 +203,6 @@ def main():
         host_ip=host_ip,
         amp_client=amp_client,
     )
-    _reconciler._cfg = cfg
 
     _sync_flag = _sync_flag_path(cfg)
     _status["sync_enabled"] = _sync_flag.exists()

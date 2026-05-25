@@ -129,11 +129,11 @@ class AMPClient:
             except ValueError:
                 continue
 
-            proto = "tcp" if "TCP" in display else "udp"
-            key = (port, proto)
-            if key not in seen:
-                seen.add(key)
-                ports.append({"host_port": port, "protocol": proto})
+            for proto in ("tcp", "udp"):
+                key = (port, proto)
+                if key not in seen:
+                    seen.add(key)
+                    ports.append({"host_port": port, "protocol": proto})
         return ports
 
     def resolve_container_name(self, container_name: str, instances: Optional[dict] = None) -> str:
