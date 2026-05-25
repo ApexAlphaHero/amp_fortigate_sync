@@ -380,8 +380,9 @@ def cmd_debug_amp(cfg: dict):
             else:
                 print("    (none)")
 
-            # Per-instance network info
+            # Per-instance network info (authoritative port source)
             if instance_id:
+                _PROTO_NAMES = {0: "tcp", 1: "udp", 2: "tcp+udp"}
                 ni_data = client._post(
                     "/API/ADSModule/GetInstanceNetworkInfo",
                     {"InstanceName": name},
@@ -392,7 +393,11 @@ def cmd_debug_amp(cfg: dict):
                 elif isinstance(ni_data, list):
                     print(f"  NetworkInfo ({len(ni_data)}):")
                     for ni in ni_data:
-                        print(f"    {json.dumps(ni)}")
+                        fw = "FW" if ni.get("IsFirewallTarget") else "  "
+                        proto = _PROTO_NAMES.get(ni.get("Protocol", 0), "?")
+                        desc = ni.get("Description", "")
+                        port = ni.get("PortNumber", "?")
+                        print(f"    [{fw}] {port:<6} {proto:<8} {desc}")
                 else:
                     print(f"  NetworkInfo (raw): {json.dumps(ni_data, indent=4)}")
     print()

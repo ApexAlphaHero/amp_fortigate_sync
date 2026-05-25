@@ -5,7 +5,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_SKIP_ENDPOINTS = {"SFTP SERVER"}
+# Descriptions containing these words are skipped — not player-facing ports
+_SKIP_DESCRIPTIONS = {"SFTP", "RCON"}
+
+# AMP protocol field values
+_PROTO_MAP = {0: ["tcp"], 1: ["udp"], 2: ["tcp", "udp"]}
 
 
 class AMPClient:
@@ -89,7 +93,7 @@ class AMPClient:
                 module = instance.get("ModuleName", "")
                 if module.upper().startswith("ADS"):
                     continue
-                ports = self._parse_endpoints(instance.get("ApplicationEndpoints", []))
+                ports = self._get_network_ports(name)
                 instances[name] = {
                     "instance_id": instance.get("InstanceID"),
                     "module": module,
@@ -99,37 +103,39 @@ class AMPClient:
                 }
         return instances
 
-    @staticmethod
-    def _parse_endpoints(endpoints: list) -> list[dict]:
-        """Parse ApplicationEndpoints into [{host_port, protocol}] dicts.
+    def _get_network_ports(self, instance_name: str) -> list[dict]:
+        """Fetch per-instance port list via GetInstanceNetworkInfo.
 
-        Skips SFTP and other non-game endpoints.
-        Defaults to UDP when the display name doesn't specify a protocol,
-        which is correct for the majority of game servers.
+        Uses IsFirewallTarget to identify ports that need forwarding, and
+        the Protocol field for the actual transport (0=TCP, 1=UDP, 2=both).
+        SFTP and RCON ports are excluded.
         """
+        data = self._post(
+            "/API/ADSModule/GetInstanceNetworkInfo",
+            {"InstanceName": instance_name},
+            wrap=False,
+        )
+        if not isinstance(data, list):
+            logger.warning("GetInstanceNetworkInfo for %s returned unexpected data: %s", instance_name, data)
+            return []
+
         ports = []
-        seen = set()
-        for ep in endpoints:
-            display = (ep.get("DisplayName") or "").upper()
-            if display in _SKIP_ENDPOINTS:
+        seen: set[tuple] = set()
+        for entry in data:
+            if not entry.get("IsFirewallTarget"):
                 continue
-
-            endpoint_str = ep.get("Endpoint", "")
-            if ":" in endpoint_str:
-                _, port_str = endpoint_str.rsplit(":", 1)
-            else:
-                port_str = endpoint_str
-
-            try:
-                port = int(port_str)
-            except ValueError:
+            desc = (entry.get("Description") or "").upper()
+            if any(skip in desc for skip in _SKIP_DESCRIPTIONS):
                 continue
-
-            for proto in ("tcp", "udp"):
+            port = entry.get("PortNumber")
+            if port is None:
+                continue
+            proto_num = entry.get("Protocol", 0)
+            for proto in _PROTO_MAP.get(proto_num, ["tcp"]):
                 key = (port, proto)
                 if key not in seen:
                     seen.add(key)
-                    ports.append({"host_port": port, "protocol": proto})
+                    ports.append({"host_port": port, "protocol": proto, "description": entry.get("Description", "")})
         return ports
 
     def resolve_container_name(self, container_name: str, instances: Optional[dict] = None) -> str:
