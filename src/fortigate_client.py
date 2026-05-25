@@ -73,7 +73,7 @@ class FortigateClient:
     # ------------------------------------------------------------------
 
     def get_managed_vips(self) -> list[dict]:
-        data = self._request("GET", "/api/v2/cmdb/firewall/vip/")
+        data = self._request("GET", "/api/v2/cmdb/firewall/vip/", params={"count": -1})
         return [v for v in data.get("results", []) if (v.get("name") or "").startswith(_NAME_PREFIX)]
 
     def create_vip(
@@ -108,7 +108,7 @@ class FortigateClient:
     # ------------------------------------------------------------------
 
     def get_managed_service_objects(self) -> list[dict]:
-        data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/")
+        data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/", params={"count": -1})
         return [s for s in data.get("results", []) if (s.get("name") or "").startswith(_NAME_PREFIX)]
 
     def get_service_categories(self) -> list[dict]:
@@ -173,7 +173,7 @@ class FortigateClient:
     # ------------------------------------------------------------------
 
     def get_managed_policies(self) -> list[dict]:
-        data = self._request("GET", "/api/v2/cmdb/firewall/policy/")
+        data = self._request("GET", "/api/v2/cmdb/firewall/policy/", params={"count": -1})
         return [p for p in data.get("results", []) if (p.get("name") or "").startswith(_NAME_PREFIX)]
 
     def create_policy(
