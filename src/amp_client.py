@@ -23,12 +23,10 @@ class AMPClient:
             resp = self._session.post(
                 f"{self._base}/API/Core/Login",
                 json={
-                    "parameters": {
-                        "username": self._username,
-                        "password": self._password,
-                        "token": "",
-                        "rememberMe": False,
-                    }
+                    "username": self._username,
+                    "password": self._password,
+                    "token": "",
+                    "rememberMe": False,
                 },
                 timeout=5,
             )
