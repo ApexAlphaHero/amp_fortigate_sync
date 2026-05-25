@@ -105,11 +105,11 @@ class FortigateClient:
     # ------------------------------------------------------------------
 
     def get_managed_service_objects(self) -> list[dict]:
-        data = self._request("GET", "/api/v2/cmdb/firewall/service/custom/")
+        data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/")
         return [s for s in data.get("results", []) if (s.get("name") or "").startswith(_NAME_PREFIX)]
 
     def get_service_categories(self) -> list[dict]:
-        data = self._request("GET", "/api/v2/cmdb/firewall/service/category/")
+        data = self._request("GET", "/api/v2/cmdb/firewall.service/category/")
         return data.get("results", [])
 
     def ensure_service_category(self, name: str):
@@ -120,7 +120,7 @@ class FortigateClient:
                 logger.debug("Service category %r already exists", name)
                 return
             logger.info("Creating service category: %s", name)
-            self._request("POST", "/api/v2/cmdb/firewall/service/category/", json={"name": name})
+            self._request("POST", "/api/v2/cmdb/firewall.service/category/", json={"name": name})
         except Exception as e:
             logger.warning("Could not ensure service category %r: %s", name, e)
 
@@ -148,7 +148,7 @@ class FortigateClient:
     ) -> dict:
         payload = {"name": name, **self._service_payload(tcp_ranges, udp_ranges, category)}
         logger.info("Creating service object: %s  tcp=%s udp=%s", name, tcp_ranges, udp_ranges)
-        return self._request("POST", "/api/v2/cmdb/firewall/service/custom/", json=payload)
+        return self._request("POST", "/api/v2/cmdb/firewall.service/custom/", json=payload)
 
     def update_service_object(
         self,
@@ -159,11 +159,11 @@ class FortigateClient:
     ):
         payload = self._service_payload(tcp_ranges, udp_ranges, category)
         logger.info("Updating service object: %s  tcp=%s udp=%s", name, tcp_ranges, udp_ranges)
-        self._request("PUT", f"/api/v2/cmdb/firewall/service/custom/{name}", json=payload)
+        self._request("PUT", f"/api/v2/cmdb/firewall.service/custom/{name}", json=payload)
 
     def delete_service_object(self, name: str):
         logger.info("Deleting service object: %s", name)
-        self._delete(f"/api/v2/cmdb/firewall/service/custom/{name}", f"service {name}")
+        self._delete(f"/api/v2/cmdb/firewall.service/custom/{name}", f"service {name}")
 
     # ------------------------------------------------------------------
     # Policies
