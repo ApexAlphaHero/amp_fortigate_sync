@@ -11,6 +11,7 @@ docker:
 amp:
   # Use the server's LAN IP — AMP blocks API auth from 127.0.0.1/localhost
   host: "http://192.168.1.100:8080"
+  excluded_instances: ["ADS01"]  # Instance names to skip (the AMP manager itself)
 
 fortigate:
   host: "https://192.168.1.1"   # FortiGate management IP/hostname

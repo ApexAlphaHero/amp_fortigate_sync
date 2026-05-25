@@ -97,7 +97,8 @@ def _make_fg(cfg: dict) -> FortigateClient:
 def _make_amp(cfg: dict):
     amp_cfg = cfg.get("amp", {})
     if amp_cfg.get("host") and amp_cfg.get("username") and amp_cfg.get("password"):
-        return AMPClient(host=amp_cfg["host"], username=amp_cfg["username"], password=amp_cfg["password"])
+        excluded = set(amp_cfg.get("excluded_instances", ["ADS01"]))
+        return AMPClient(host=amp_cfg["host"], username=amp_cfg["username"], password=amp_cfg["password"], excluded_instances=excluded)
     return None
 
 

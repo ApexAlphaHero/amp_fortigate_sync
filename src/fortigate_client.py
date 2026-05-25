@@ -41,6 +41,13 @@ class FortigateClient:
                 return resp.json() if resp.content else {}
             except requests.RequestException as e:
                 if attempt == _MAX_RETRIES - 1:
+                    body = ""
+                    if hasattr(e, "response") and e.response is not None:
+                        try:
+                            body = f" — response: {e.response.text[:500]}"
+                        except Exception:
+                            pass
+                    logger.error("FortiGate request failed (final attempt): %s%s", e, body)
                     raise
                 wait = _BACKOFF_BASE ** attempt
                 logger.warning("FortiGate request failed (attempt %d/%d): %s — retrying in %.1fs",
@@ -113,7 +120,7 @@ class FortigateClient:
         if udp_ranges:
             payload["udp-portrange"] = " ".join(udp_ranges)
         if category:
-            payload["category"] = category
+            payload["category"] = [{"name": category}]
         return payload
 
     def create_service_object(

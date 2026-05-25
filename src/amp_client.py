@@ -13,10 +13,11 @@ _PROTO_MAP = {0: ["tcp"], 1: ["udp"], 2: ["tcp", "udp"]}
 
 
 class AMPClient:
-    def __init__(self, host: str, username: str, password: str):
+    def __init__(self, host: str, username: str, password: str, excluded_instances: set[str] | None = None):
         self._base = host.rstrip("/")
         self._username = username
         self._password = password
+        self._excluded = excluded_instances or {"ADS01"}
         self._session = requests.Session()
         self._session.headers.update({
             "Accept": "application/json",
@@ -91,7 +92,7 @@ class AMPClient:
                 if not name:
                     continue
                 module = instance.get("ModuleName", "")
-                if module.upper().startswith("ADS"):
+                if module.upper().startswith("ADS") or name in self._excluded:
                     continue
                 ports = self._get_network_ports(name)
                 instances[name] = {

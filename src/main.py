@@ -174,10 +174,12 @@ def main():
     amp_cfg = cfg.get("amp", {})
     amp_client = None
     if amp_cfg.get("host") and amp_cfg.get("username") and amp_cfg.get("password"):
+        excluded = set(amp_cfg.get("excluded_instances", ["ADS01"]))
         amp_client = AMPClient(
             host=amp_cfg["host"],
             username=amp_cfg["username"],
             password=amp_cfg["password"],
+            excluded_instances=excluded,
         )
 
     db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
