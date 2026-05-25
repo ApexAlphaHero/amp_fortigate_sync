@@ -78,7 +78,8 @@ class AMPClient:
             return {}
 
         instances = {}
-        for entry in data.get("result", []):
+        entries = data if isinstance(data, list) else data.get("result", [])
+        for entry in entries:
             for instance in entry.get("AvailableInstances", []):
                 name = instance.get("FriendlyName") or instance.get("InstanceName")
                 if not name:
