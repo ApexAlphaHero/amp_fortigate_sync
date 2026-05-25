@@ -214,12 +214,18 @@ class FortigateClient:
     def move_policy_after(self, policy_id: int, after_id: int):
         """Move a policy to sit immediately after another policy in the list."""
         logger.info("Moving policy %s to after policy %s", policy_id, after_id)
-        self._request(
-            "PUT",
-            f"/api/v2/cmdb/firewall/policy/{policy_id}",
-            params={"action": "move", "where": "after", "neighbor": str(after_id)},
-            json={},
-        )
+        try:
+            self._request(
+                "PUT",
+                f"/api/v2/cmdb/firewall/policy/{policy_id}",
+                params={"action": "move", "where": "after", "neighbor": str(after_id)},
+                json={},
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 400:
+                logger.warning("Policy %s move returned 400 — already in position", policy_id)
+            else:
+                raise
 
     def delete_policy(self, policy_id: int):
         logger.info("Deleting policy id: %s", policy_id)
