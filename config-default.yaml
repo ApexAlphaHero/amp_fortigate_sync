@@ -19,7 +19,7 @@ fortigate:
   ssl_verify: true
   ssl_ssh_profile: "Games"       # SSL/SSH inspection profile applied to created policies (set to null or remove to disable)
   policy_insert_after: null      # Policy ID to insert new rules after (null = system default position)
-  service_category: "Games"     # Category assigned to created service objects (null to leave uncategorized)
+  service_category: "amp-sync"     # Category assigned to created service objects (null to leave uncategorized)
 
 # host_ip: auto-detected from the default network route (outbound LAN IP).
 # Override here only if auto-detection picks the wrong interface.
