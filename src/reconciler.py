@@ -114,7 +114,18 @@ class Reconciler:
                 logger.error("Failed to ensure rules for %s: %s", instance_name, e)
                 stats["errors"] += 1
 
-        # Delete orphan VIPs
+        # Delete orphan policies first (they reference VIPs — must go before VIP deletion)
+        for name in set(live_policies) - expected_instance_names:
+            try:
+                pid = live_policies[name].get("policyid") or live_policies[name].get("id")
+                if pid is not None:
+                    self._fg.delete_policy(pid)
+                stats["removed"] += 1
+            except Exception as e:
+                logger.error("Failed to delete orphan policy %s: %s", name, e)
+                stats["errors"] += 1
+
+        # Delete orphan VIPs (now safe — no policies reference them)
         for vip_name in set(live_vips) - expected_vip_names:
             try:
                 self._fg.delete_vip(vip_name)
@@ -124,23 +135,13 @@ class Reconciler:
                 logger.error("Failed to delete orphan VIP %s: %s", vip_name, e)
                 stats["errors"] += 1
 
-        # Delete orphan service objects and policies (keyed by instance name)
+        # Delete orphan service objects
         for name in set(live_services) - expected_instance_names:
             try:
                 self._fg.delete_service_object(name)
                 stats["removed"] += 1
             except Exception as e:
                 logger.error("Failed to delete orphan service object %s: %s", name, e)
-                stats["errors"] += 1
-
-        for name in set(live_policies) - expected_instance_names:
-            try:
-                pid = live_policies[name].get("policyid") or live_policies[name].get("id")
-                if pid is not None:
-                    self._fg.delete_policy(pid)
-                stats["removed"] += 1
-            except Exception as e:
-                logger.error("Failed to delete orphan policy %s: %s", name, e)
                 stats["errors"] += 1
 
         logger.info("Reconcile: +%d -%d ~%d errors=%d",

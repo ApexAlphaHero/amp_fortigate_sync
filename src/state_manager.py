@@ -20,28 +20,44 @@ class StateManager:
             with self._connect() as conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS instance_state (
-                        instance_name     TEXT PRIMARY KEY,
-                        ports             TEXT NOT NULL,
-                        running           INTEGER NOT NULL DEFAULT 0,
-                        policy_ids        TEXT NOT NULL,
-                        vip_names         TEXT NOT NULL,
-                        service_obj_names TEXT NOT NULL
+                        instance_name TEXT PRIMARY KEY,
+                        ports         TEXT NOT NULL,
+                        running       INTEGER NOT NULL DEFAULT 0,
+                        policy_id     TEXT,
+                        vip_names     TEXT NOT NULL
                     )
                 """)
-                # Migrate old container_state table if present
-                tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if "container_state" in tables and "instance_state" not in tables:
-                    conn.execute("""
-                        INSERT OR IGNORE INTO instance_state
-                            (instance_name, ports, running, policy_ids, vip_names, service_obj_names)
-                        SELECT name, ports, 0, policy_ids, vip_names, service_obj_names
-                        FROM container_state
-                    """)
-                    conn.execute("DROP TABLE container_state")
-                # Add running column to instance_state if missing (first migration from container_state)
                 cols = {row[1] for row in conn.execute("PRAGMA table_info(instance_state)")}
-                if "running" not in cols:
-                    conn.execute("ALTER TABLE instance_state ADD COLUMN running INTEGER NOT NULL DEFAULT 0")
+                # Migrate old schema: policy_ids (list) → policy_id (scalar)
+                if "policy_ids" in cols and "policy_id" not in cols:
+                    conn.execute("ALTER TABLE instance_state ADD COLUMN policy_id TEXT")
+                    conn.execute("""
+                        UPDATE instance_state
+                        SET policy_id = (
+                            SELECT json_extract(policy_ids, '$[0]')
+                        )
+                    """)
+                # Drop obsolete columns (SQLite <3.35 can't DROP COLUMN, so we recreate)
+                if "policy_ids" in cols or "service_obj_names" in cols:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS instance_state_new (
+                            instance_name TEXT PRIMARY KEY,
+                            ports         TEXT NOT NULL,
+                            running       INTEGER NOT NULL DEFAULT 0,
+                            policy_id     TEXT,
+                            vip_names     TEXT NOT NULL
+                        )
+                    """)
+                    conn.execute("""
+                        INSERT OR REPLACE INTO instance_state_new
+                            (instance_name, ports, running, policy_id, vip_names)
+                        SELECT instance_name, ports, running,
+                               COALESCE(policy_id, json_extract(policy_ids, '$[0]')),
+                               vip_names
+                        FROM instance_state
+                    """)
+                    conn.execute("DROP TABLE instance_state")
+                    conn.execute("ALTER TABLE instance_state_new RENAME TO instance_state")
 
     def load_all(self) -> dict:
         with self._lock:
@@ -55,22 +71,20 @@ class StateManager:
                 conn.execute(
                     """
                     INSERT INTO instance_state
-                        (instance_name, ports, running, policy_ids, vip_names, service_obj_names)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (instance_name, ports, running, policy_id, vip_names)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(instance_name) DO UPDATE SET
-                        ports             = excluded.ports,
-                        running           = excluded.running,
-                        policy_ids        = excluded.policy_ids,
-                        vip_names         = excluded.vip_names,
-                        service_obj_names = excluded.service_obj_names
+                        ports     = excluded.ports,
+                        running   = excluded.running,
+                        policy_id = excluded.policy_id,
+                        vip_names = excluded.vip_names
                     """,
                     (
                         instance_name,
                         json.dumps(data["ports"]),
                         int(data.get("running", False)),
-                        json.dumps(data["policy_ids"]),
+                        json.dumps(data.get("policy_id")),
                         json.dumps(data["vip_names"]),
-                        json.dumps(data["service_obj_names"]),
                     ),
                 )
 
@@ -92,7 +106,6 @@ class StateManager:
         return {
             "ports": json.loads(row["ports"]),
             "running": bool(row["running"]),
-            "policy_ids": json.loads(row["policy_ids"]),
+            "policy_id": json.loads(row["policy_id"]) if row["policy_id"] else None,
             "vip_names": json.loads(row["vip_names"]),
-            "service_obj_names": json.loads(row["service_obj_names"]),
         }
