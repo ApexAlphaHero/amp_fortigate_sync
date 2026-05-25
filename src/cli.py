@@ -337,6 +337,48 @@ def cmd_sync_now(cfg: dict):
     print(f"Reconcile complete: +{stats.get('added', 0)} added, -{stats.get('removed', 0)} removed, {stats.get('errors', 0)} errors")
 
 
+def cmd_debug_amp(cfg: dict):
+    """Dump raw ApplicationEndpoints from AMP for each instance."""
+    amp_cfg = cfg.get("amp", {})
+    if not (amp_cfg.get("host") and amp_cfg.get("username") and amp_cfg.get("password")):
+        print("AMP not configured.")
+        return
+
+    from amp_client import AMPClient
+    client = AMPClient(
+        host=amp_cfg["host"],
+        username=amp_cfg["username"],
+        password=amp_cfg["password"],
+    )
+
+    data = client._post("/API/ADSModule/GetInstances")
+    if data is None:
+        print("No response from AMP (login failed?).")
+        return
+
+    entries = data if isinstance(data, list) else data.get("result", [])
+    for entry in entries:
+        for instance in entry.get("AvailableInstances", []):
+            name = instance.get("InstanceName", "?")
+            module = instance.get("ModuleName", "?")
+            friendly = instance.get("FriendlyName", "")
+            running = instance.get("Running", False)
+            endpoints = instance.get("ApplicationEndpoints", [])
+
+            print(f"\n{'='*60}")
+            print(f"  InstanceName : {name}")
+            print(f"  ModuleName   : {module}")
+            print(f"  FriendlyName : {friendly}")
+            print(f"  Running      : {running}")
+            print(f"  Endpoints ({len(endpoints)}):")
+            if endpoints:
+                for ep in endpoints:
+                    print(f"    DisplayName={ep.get('DisplayName')!r:30s}  Endpoint={ep.get('Endpoint')!r}")
+            else:
+                print("    (none)")
+    print()
+
+
 def cmd_enable_sync(cfg: dict):
     flag = _sync_flag_path(cfg)
     flag.parent.mkdir(parents=True, exist_ok=True)
@@ -364,12 +406,13 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("query-amp",      help="List AMP instances and their Docker container ports")
-    sub.add_parser("query-fw",       help="List firewall rules created by this script ([amp-sync] tagged)")
+    sub.add_parser("query-fw",       help="List firewall rules created by this script (amp-sync- prefix)")
     sub.add_parser("list-instances", help="List AMP instances alongside their expected rule names")
     sub.add_parser("dry-run",        help="Show what rules would be created/deleted without making changes")
     sub.add_parser("sync-now",       help="Trigger an immediate reconcile (bypasses poll interval)")
     sub.add_parser("enable-sync",    help="Enable firewall sync (creates flag file, triggers immediate reconcile)")
     sub.add_parser("disable-sync",   help="Disable firewall sync (removes flag file, no further FW changes)")
+    sub.add_parser("debug-amp",      help="Dump raw AMP ApplicationEndpoints for each instance")
 
     args = parser.parse_args()
     cfg = _load_config()
@@ -382,6 +425,7 @@ def main():
         "sync-now":       cmd_sync_now,
         "enable-sync":    cmd_enable_sync,
         "disable-sync":   cmd_disable_sync,
+        "debug-amp":      cmd_debug_amp,
     }
     dispatch[args.command](cfg)
 

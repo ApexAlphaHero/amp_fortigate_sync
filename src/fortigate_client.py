@@ -7,7 +7,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_SYNC_TAG = "[amp-sync]"
+_NAME_PREFIX = "amp-sync-"
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0
 
@@ -64,7 +64,7 @@ class FortigateClient:
 
     def get_managed_vips(self) -> list[dict]:
         data = self._request("GET", "/api/v2/cmdb/firewall/vip/")
-        return [v for v in data.get("results", []) if _SYNC_TAG in (v.get("comment") or "")]
+        return [v for v in data.get("results", []) if (v.get("name") or "").startswith(_NAME_PREFIX)]
 
     def create_vip(
         self,
@@ -85,7 +85,6 @@ class FortigateClient:
             "extport": str(ext_port),
             "mappedip": [{"range": mapped_ip}],
             "mappedport": str(mapped_port),
-            "comment": _SYNC_TAG,
         }
         logger.info("Creating VIP: %s  %s:%d → %s:%d/%s", name, ext_ip, ext_port, mapped_ip, mapped_port, protocol)
         return self._request("POST", "/api/v2/cmdb/firewall/vip/", json=payload)
@@ -100,7 +99,7 @@ class FortigateClient:
 
     def get_managed_service_objects(self) -> list[dict]:
         data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/")
-        return [s for s in data.get("results", []) if _SYNC_TAG in (s.get("comment") or "")]
+        return [s for s in data.get("results", []) if (s.get("name") or "").startswith(_NAME_PREFIX)]
 
     def create_service_object(self, name: str, port: int, protocol: str) -> dict:
         proto_upper = protocol.upper()
@@ -108,7 +107,6 @@ class FortigateClient:
         payload = {
             "name": name,
             "protocol": "TCP/UDP/SCTP",
-            "comment": _SYNC_TAG,
         }
         if proto_upper == "UDP":
             payload["udp-portrange"] = port_str
@@ -127,7 +125,7 @@ class FortigateClient:
 
     def get_managed_policies(self) -> list[dict]:
         data = self._request("GET", "/api/v2/cmdb/firewall/policy/")
-        return [p for p in data.get("results", []) if _SYNC_TAG in (p.get("comments") or "")]
+        return [p for p in data.get("results", []) if (p.get("name") or "").startswith(_NAME_PREFIX)]
 
     def create_policy(
         self,
@@ -146,7 +144,6 @@ class FortigateClient:
             "service": [{"name": service_obj_name}],
             "action": "accept",
             "status": status,
-            "comments": _SYNC_TAG,
         }
         if ssl_ssh_profile:
             payload["ssl-ssh-profile"] = ssl_ssh_profile

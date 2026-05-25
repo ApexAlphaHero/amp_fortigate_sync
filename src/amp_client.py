@@ -90,8 +90,7 @@ class AMPClient:
                 if not name:
                     continue
                 module = instance.get("ModuleName", "")
-                # Skip the ADS controller itself — it's not a game server
-                if module == "ADS":
+                if module.upper().startswith("ADS"):
                     continue
                 ports = self._parse_endpoints(instance.get("ApplicationEndpoints", []))
                 instances[name] = {
