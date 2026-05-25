@@ -228,8 +228,6 @@ class Reconciler:
                 srcaddr=self._srcaddr,
             )
             policy_id = resp.get("mkey")
-            if policy_id is not None and self._policy_insert_after is not None:
-                self._fg.move_policy_after(int(policy_id), self._policy_insert_after)
             result = "created"
         else:
             current = live_policies[inst_name]
