@@ -12,7 +12,6 @@ import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-# Allow bare imports from src/
 sys.path.insert(0, str(Path(__file__).parent))
 
 from amp_client import AMPClient
@@ -31,15 +30,19 @@ def _load_config() -> dict:
     config_path = Path(__file__).parent.parent / "config.yaml"
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
-    # Inject secrets from environment
     cfg.setdefault("amp", {})["username"] = os.environ.get("AMP_USERNAME", cfg["amp"].get("username", ""))
     cfg["amp"]["password"] = os.environ.get("AMP_PASSWORD", cfg["amp"].get("password", ""))
     cfg.setdefault("fortigate", {})["token"] = os.environ.get("FORTIGATE_API_TOKEN", cfg["fortigate"].get("token", ""))
     return cfg
 
 
+def _sync_flag_path(cfg: dict) -> Path:
+    db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
+    return Path(db_path).parent / "sync_enabled"
+
+
 # ---------------------------------------------------------------------------
-# Global state for /status endpoint
+# Module-level state (shared between threads and FastAPI)
 # ---------------------------------------------------------------------------
 
 _status = {
@@ -47,7 +50,12 @@ _status = {
     "last_reconcile": None,
     "last_reconcile_stats": {},
     "container_count": 0,
+    "sync_enabled": False,
 }
+
+_reconciler: Reconciler = None
+_docker_inspector: DockerInspector = None
+_sync_flag: Path = None
 
 # ---------------------------------------------------------------------------
 # FastAPI
@@ -63,7 +71,27 @@ def health():
 
 @app.get("/status")
 def status():
-    return _status
+    return {**_status, "sync_enabled": _sync_flag.exists() if _sync_flag else False}
+
+
+@app.post("/sync/enable")
+def sync_enable():
+    _sync_flag.touch()
+    _status["sync_enabled"] = True
+    threading.Thread(
+        target=_run_reconcile,
+        args=(_reconciler, _docker_inspector),
+        daemon=True,
+        name="reconcile-on-enable",
+    ).start()
+    return {"sync_enabled": True, "message": "Sync enabled; reconcile triggered"}
+
+
+@app.post("/sync/disable")
+def sync_disable():
+    _sync_flag.unlink(missing_ok=True)
+    _status["sync_enabled"] = False
+    return {"sync_enabled": False, "message": "Sync disabled"}
 
 
 # ---------------------------------------------------------------------------
@@ -71,16 +99,21 @@ def status():
 # ---------------------------------------------------------------------------
 
 def _run_reconcile(reconciler: Reconciler, docker_inspector: DockerInspector):
+    if not _sync_flag or not _sync_flag.exists():
+        return
     stats = reconciler.reconcile()
     _status["last_reconcile"] = datetime.now(timezone.utc).isoformat()
     _status["last_reconcile_stats"] = stats
     _status["container_count"] = len(docker_inspector.get_running_containers())
+    _status["sync_enabled"] = True
 
 
 def _event_listener(reconciler: Reconciler, docker_inspector: DockerInspector):
     logger = logging.getLogger("event_listener")
     logger.info("Docker event listener started")
     for event in docker_inspector.listen_events():
+        if not _sync_flag or not _sync_flag.exists():
+            continue
         logger.debug("Docker event: %s %s", event.get("Action"), event.get("id", "")[:12])
         try:
             _run_reconcile(reconciler, docker_inspector)
@@ -102,6 +135,8 @@ def _poll_loop(reconciler: Reconciler, docker_inspector: DockerInspector, interv
 # ---------------------------------------------------------------------------
 
 def main():
+    global _reconciler, _docker_inspector, _sync_flag
+
     cfg = _load_config()
 
     logging.basicConfig(
@@ -111,7 +146,7 @@ def main():
     logger = logging.getLogger("main")
 
     docker_cfg = cfg.get("docker", {})
-    docker_inspector = DockerInspector(
+    _docker_inspector = DockerInspector(
         socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
         label_filter=docker_cfg.get("label_filter") or None,
     )
@@ -147,8 +182,8 @@ def main():
     else:
         logger.info("Using configured host IP: %s", host_ip)
 
-    reconciler = Reconciler(
-        docker_inspector=docker_inspector,
+    _reconciler = Reconciler(
+        docker_inspector=_docker_inspector,
         state_manager=state_manager,
         fortigate_client=fg_client,
         ext_ip=ext_ip,
@@ -156,19 +191,25 @@ def main():
         amp_client=amp_client,
     )
 
-    logger.info("Running initial reconcile...")
-    _run_reconcile(reconciler, docker_inspector)
+    _sync_flag = _sync_flag_path(cfg)
+    _status["sync_enabled"] = _sync_flag.exists()
+
+    if _sync_flag.exists():
+        logger.info("Sync is ENABLED — running initial reconcile")
+        _run_reconcile(_reconciler, _docker_inspector)
+    else:
+        logger.info("Sync is DISABLED — run 'cli.py enable-sync' or POST /sync/enable to start syncing")
 
     threading.Thread(
         target=_event_listener,
-        args=(reconciler, docker_inspector),
+        args=(_reconciler, _docker_inspector),
         daemon=True,
         name="docker-events",
     ).start()
 
     threading.Thread(
         target=_poll_loop,
-        args=(reconciler, docker_inspector, cfg.get("poll_interval_seconds", 30)),
+        args=(_reconciler, _docker_inspector, cfg.get("poll_interval_seconds", 30)),
         daemon=True,
         name="poll-loop",
     ).start()

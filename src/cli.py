@@ -5,12 +5,16 @@ Usage:
   python src/cli.py query-amp
   python src/cli.py query-fw
   python src/cli.py list-instances
+  python src/cli.py enable-sync
+  python src/cli.py disable-sync
 """
 import argparse
 import json
 import os
 import sys
 from pathlib import Path
+
+import requests as _requests
 
 import yaml
 from dotenv import load_dotenv
@@ -193,6 +197,39 @@ def cmd_list_instances(cfg: dict):
 
 
 # ---------------------------------------------------------------------------
+# Sync control
+# ---------------------------------------------------------------------------
+
+def _sync_flag_path(cfg: dict) -> Path:
+    db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
+    return Path(db_path).parent / "sync_enabled"
+
+
+def _notify_service(endpoint: str):
+    """Best-effort POST to the running service; silently ignored if not running."""
+    try:
+        _requests.post(f"http://localhost:8000{endpoint}", timeout=3)
+    except Exception:
+        pass
+
+
+def cmd_enable_sync(cfg: dict):
+    flag = _sync_flag_path(cfg)
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.touch()
+    print("Sync ENABLED.")
+    _notify_service("/sync/enable")
+    print("Service will reconcile immediately (if running) or on next poll cycle.")
+
+
+def cmd_disable_sync(cfg: dict):
+    flag = _sync_flag_path(cfg)
+    flag.unlink(missing_ok=True)
+    print("Sync DISABLED. No further firewall changes will be made.")
+    _notify_service("/sync/disable")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -205,6 +242,8 @@ def main():
     sub.add_parser("query-amp",      help="List AMP instances and their Docker container ports")
     sub.add_parser("query-fw",       help="List firewall rules created by this script ([amp-sync] tagged)")
     sub.add_parser("list-instances", help="List AMP instances alongside their expected rule names")
+    sub.add_parser("enable-sync",    help="Enable firewall sync (creates flag file, triggers immediate reconcile)")
+    sub.add_parser("disable-sync",   help="Disable firewall sync (removes flag file, no further FW changes)")
 
     args = parser.parse_args()
     cfg = _load_config()
@@ -213,6 +252,8 @@ def main():
         "query-amp":      cmd_query_amp,
         "query-fw":       cmd_query_fw,
         "list-instances": cmd_list_instances,
+        "enable-sync":    cmd_enable_sync,
+        "disable-sync":   cmd_disable_sync,
     }
     dispatch[args.command](cfg)
 
