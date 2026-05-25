@@ -1,81 +1,151 @@
 # amp-fw-sync
 
-Watches Docker containers and automatically syncs their port bindings to FortiGate firewall rules. When a container starts with exposed ports, the script creates a **Virtual IP** (port-forward DNAT), a **custom service object**, and a **policy** — all tagged `[amp-sync]` in their comments. When the container stops or is deleted, those rules are removed.
-
-AMP (CubeCoders) instance names are used as human-readable labels where available, falling back to Docker container names.
+Watches [CubeCoders AMP](https://cubecoders.com/AMP) game server instances and automatically syncs their port bindings to FortiGate firewall rules. When an AMP instance is configured with ports, the script creates the matching FortiGate objects. When ports change or an instance is removed, the rules are updated or deleted.
 
 ## How it works
 
-For each exposed container port, three FortiGate objects are created:
+For each AMP instance, three FortiGate objects are created and kept in sync:
 
 | Object | Name pattern | Purpose |
 |--------|-------------|---------|
-| Virtual IP | `amp-sync-{label}-{port}-{proto}` | DNAT — maps FortiGate WAN IP:port → host IP:port |
-| Service object | `amp-sync-{label}-{port}-{proto}` | Defines the port/protocol |
-| Policy | `amp-sync-{label}-{port}-{proto}` | Allows the traffic through |
+| Virtual IP (one per port group) | `amp-sync-{instance}-{port}-{proto}` | DNAT — maps `ext_ip:port` → `host_ip:port` |
+| Service object (one per instance) | `amp-sync-{instance}` | Defines all ports/protocols for this instance |
+| Policy (one per instance) | `amp-sync-{instance}` | Allows traffic through the firewall |
 
-The `[amp-sync]` comment tag is how the script identifies its own rules — it never touches anything it didn't create.
+Consecutive ports of the same protocol are grouped into a single VIP range (e.g. ports 7777–7779 UDP become one VIP). All objects are prefixed `amp-sync-` — the script only ever touches objects it created.
 
-## Installation (Debian)
+Instances that are stopped have their policy set to `disabled` rather than deleted, so the rules are ready when the server starts again.
+
+## Installation (Debian / Ubuntu)
 
 ```bash
 sudo apt-get install -y git
 git clone https://github.com/ApexAlphaHero/amp_fortigate_sync.git
 cd amp_fortigate_sync
-sudo bash install.sh
+sudo bash deploy.sh
 ```
 
-The install script handles Python, Docker, the `amp-sync` system user, venv, and the systemd service. It will pause and prompt you to write secrets before starting.
+The deploy script creates the `amp-sync` system user, sets up a Python venv, copies source files to `/opt/amp-fw-sync/`, installs the systemd service, and creates `/etc/amp-fw-sync/secrets.env` for credentials.
 
-Installs to:
+**The service starts with sync disabled.** Fill in credentials, configure `config.yaml`, verify things look right with `query-amp` and `dry-run`, then enable sync when ready.
+
+### Updating
+
+```bash
+cd amp_fortigate_sync
+git pull
+sudo bash deploy.sh
+```
+
+`deploy.sh` preserves your existing `/opt/amp-fw-sync/config.yaml` if you've modified it.
+
+### Installed paths
 
 | Path | Contents |
 |------|----------|
-| `/opt/amp-fw-sync/` | Source files and venv |
-| `/var/lib/amp-fw-sync/state.db` | SQLite state |
-| `/etc/amp-fw-sync/secrets.env` | Secrets (AMP credentials, FortiGate token) |
+| `/opt/amp-fw-sync/src/` | Source files |
+| `/opt/amp-fw-sync/venv/` | Python virtualenv |
+| `/opt/amp-fw-sync/config.yaml` | Configuration |
+| `/var/lib/amp-fw-sync/state.db` | SQLite state database |
+| `/var/lib/amp-fw-sync/sync_enabled` | Flag file — exists when sync is on |
+| `/etc/amp-fw-sync/secrets.env` | Credentials (never commit this) |
 | `/etc/systemd/system/amp-fw-sync.service` | Systemd unit |
 
 ## Configuration
 
-Edit `config.yaml` before installing:
+Edit `/opt/amp-fw-sync/config.yaml`. Credentials go in `/etc/amp-fw-sync/secrets.env` — never in the config file.
 
-| Key | Description |
-|-----|-------------|
-| `docker.socket` | Docker socket path |
-| `docker.label_filter` | Only watch containers with this label (blank = all) |
-| `amp.host` | AMP server LAN IP and port (e.g. `http://192.168.1.100:8080`) — use the LAN IP, not `localhost` (AMP blocks API auth from 127.0.0.1). Live API browser at `{amp.host}/API` |
-| `fortigate.host` | FortiGate base URL |
-| `fortigate.ext_ip` | FortiGate WAN/external IP — used as the VIP external address |
-| `fortigate.ssl_verify` | Verify FortiGate TLS certificate |
-| `poll_interval_seconds` | Fallback reconcile interval in seconds |
+```yaml
+docker:
+  socket: "unix:///var/run/docker.sock"
+  label_filter: ""          # e.g. "amp-sync=true" — blank = watch all containers
 
-Secrets go in `/etc/amp-fw-sync/secrets.env` (or `.env` for local dev):
+amp:
+  host: "http://192.168.1.100:8080"   # Use the LAN IP — AMP blocks auth from 127.0.0.1
+  excluded_instances: ["ADS01"]       # AMP manager instance to skip
+
+fortigate:
+  host: "https://192.168.1.1"         # FortiGate management IP or hostname
+  ext_ip: "203.0.113.1"               # WAN/public IP used as VIP external address
+  vdom: "root"                        # VDOM name — set to null if VDOMs are disabled
+  ssl_verify: true                    # Set false for self-signed certs
+  dstintf: "any"                      # Destination interface for created policies
+  srcaddr: ["all"]                    # Source address objects for created policies
+  ssl_ssh_profile: null               # SSL/SSH inspection profile (null to disable)
+  policy_insert_after: null           # Policy ID to insert new rules after (null = default)
+  service_category: "amp-sync"        # Service category for created service objects (null = none)
+
+poll_interval_seconds: 300
+log_level: "INFO"
+state_db_path: "/var/lib/amp-fw-sync/state.db"
+
+# host_ip: auto-detected from the default network route.
+# Override if auto-detection picks the wrong interface.
+# host_ip: "192.168.1.100"
+```
+
+### Secrets file
+
+`/etc/amp-fw-sync/secrets.env`:
 
 ```env
 AMP_USERNAME=your-amp-username
 AMP_PASSWORD=your-amp-password
-FORTIGATE_API_TOKEN=your-fortigate-token
+FORTIGATE_API_TOKEN=your-fortigate-api-token
 ```
+
+The FortiGate API token is created under **System > Administrators > Create New > REST API Admin**. The AMP credentials are a local AMP user account — use the server's LAN IP for `amp.host`, not `localhost`.
 
 ## CLI commands
 
+All commands use the venv Python:
+
 ```bash
-# What's running in AMP/Docker and what ports are exposed?
-python src/cli.py query-amp
+PYTHON=/opt/amp-fw-sync/venv/bin/python
+CLI=/opt/amp-fw-sync/src/cli.py
+```
 
-# What [amp-sync] rules currently exist on the firewall?
-python src/cli.py query-fw
+| Command | Description |
+|---------|-------------|
+| `$PYTHON $CLI query-amp` | List all AMP instances, their running status, and configured ports |
+| `$PYTHON $CLI query-fw` | List all `amp-sync-*` objects currently on the FortiGate |
+| `$PYTHON $CLI list-instances` | Show each instance alongside its expected rule names and policy ID |
+| `$PYTHON $CLI dry-run` | Preview what would be created/updated/deleted without making changes |
+| `$PYTHON $CLI sync-now` | Trigger an immediate reconcile (bypasses poll interval) |
+| `$PYTHON $CLI enable-sync` | Enable firewall sync and trigger an immediate reconcile |
+| `$PYTHON $CLI disable-sync` | Disable firewall sync (no further firewall changes) |
+| `$PYTHON $CLI debug-amp` | Dump raw AMP network info for each instance |
 
-# Which AMP instance maps to which rule name and policy ID?
-python src/cli.py list-instances
+## Sync enable / disable
+
+The service starts with sync **disabled**. Nothing is written to the firewall until you explicitly enable it.
+
+```bash
+# Enable — starts syncing immediately
+sudo /opt/amp-fw-sync/venv/bin/python /opt/amp-fw-sync/src/cli.py enable-sync
+
+# Disable — stops all future sync (existing rules are left in place)
+sudo /opt/amp-fw-sync/venv/bin/python /opt/amp-fw-sync/src/cli.py disable-sync
 ```
 
 ## Health and status
 
+The service exposes a small HTTP API on port 8000:
+
 ```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/status
+curl http://localhost:8000/health    # {"status": "ok"}
+curl http://localhost:8000/status    # last reconcile time, container count, sync state
+curl -X POST http://localhost:8000/sync/now     # trigger reconcile
+curl -X POST http://localhost:8000/sync/enable  # enable sync
+curl -X POST http://localhost:8000/sync/disable # disable sync
+```
+
+## Service management
+
+```bash
+systemctl status amp-fw-sync
+systemctl restart amp-fw-sync
+journalctl -u amp-fw-sync -f        # follow logs
 ```
 
 ## Local development
@@ -85,14 +155,8 @@ cp .env.example .env
 # Fill in AMP_USERNAME, AMP_PASSWORD, FORTIGATE_API_TOKEN
 
 python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+source venv/bin/activate    # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 python src/main.py
-```
-
-## Tests
-
-```bash
-pytest tests/
 ```
