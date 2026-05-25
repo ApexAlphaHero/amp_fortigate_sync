@@ -254,25 +254,36 @@ def cmd_dry_run(cfg: dict):
 
     print(f"\next_ip : {ext_ip}")
     print(f"host_ip: {host_ip}")
-    print(f"\n{'ACTION':<8} {'STATUS':<8} {'RULE NAME':<45} {'PORT':<8} {'PROTO'}")
-    print("-" * 85)
+    print(f"\n{'ACTION':<8} {'STATUS':<8} {'TYPE':<16} {'NAME'}")
+    print("-" * 95)
 
     for r in sorted(expected, key=lambda x: x["name"]):
         desired_status = "enable" if r["running"] else "disable"
         exists_vip = r["name"] in live_vip_names
         exists_svc = r["name"] in live_svc_names
         exists_pol = r["name"] in live_policies
-        if exists_vip and exists_svc and exists_pol:
+
+        vip_action  = "exists" if exists_vip else "CREATE"
+        svc_action  = "exists" if exists_svc else "CREATE"
+        if exists_pol:
             current_status = live_policies[r["name"]].get("status", "enable")
-            action = "UPDATE" if current_status != desired_status else "exists"
+            pol_action = "UPDATE" if current_status != desired_status else "exists"
         else:
-            action = "CREATE"
-        print(f"{action:<8} {desired_status:<8} {r['name']:<45} {r['port']:<8} {r['proto']}")
+            pol_action = "CREATE"
+
+        vip_label = f"VIP  ({ext_ip}:{r['port']} → {host_ip}:{r['port']} {r['proto'].upper()})"
+        svc_label = f"Service Object  (port {r['port']}/{r['proto']})"
+        pol_label = f"Policy"
+
+        print(f"{vip_action:<8} {desired_status:<8} {vip_label:<55} {r['name']}")
+        print(f"{svc_action:<8} {'':<8} {svc_label:<55} {r['name']}")
+        print(f"{pol_action:<8} {'':<8} {pol_label:<55} {r['name']}")
+        print()
 
     if to_delete:
-        print()
         for name in sorted(to_delete):
-            print(f"{'DELETE':<8} {'—':<8} {name}")
+            print(f"{'DELETE':<8} {'—':<8} {'VIP + Service + Policy':<55} {name}")
+        print()
 
     if not fw_reachable:
         return
@@ -282,7 +293,7 @@ def cmd_dry_run(cfg: dict):
                   and live_policies[r["name"]].get("status") != ("enable" if r["running"] else "disable"))
     deletes = len(to_delete)
     exists = len(expected) - creates - updates
-    print(f"\nSummary: {creates} to create, {updates} to update status, {deletes} to delete, {exists} unchanged")
+    print(f"Summary: {creates} to create, {updates} to update status, {deletes} to delete, {exists} unchanged")
 
 
 # ---------------------------------------------------------------------------
