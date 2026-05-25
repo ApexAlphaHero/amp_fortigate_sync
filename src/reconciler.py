@@ -19,8 +19,38 @@ def _safe_name(raw: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)[:63]
 
 
-def _obj_name(label: str, port: int, proto: str) -> str:
-    return _safe_name(f"amp-sync-{label}-{port}-{proto}")
+def _obj_name(label: str, start_port: int, end_port: int, proto: str) -> str:
+    if start_port == end_port:
+        return _safe_name(f"amp-sync-{label}-{start_port}-{proto}")
+    return _safe_name(f"amp-sync-{label}-{start_port}-{end_port}-{proto}")
+
+
+def _port_range_str(start: int, end: int) -> str:
+    return f"{start}-{end}" if start != end else str(start)
+
+
+def _group_consecutive_ports(ports: list[dict]) -> list[dict]:
+    """Group consecutive same-protocol ports into ranges.
+
+    Returns list of {start_port, end_port, protocol} dicts.
+    Non-consecutive ports of the same protocol produce separate groups.
+    """
+    by_proto: dict[str, list[int]] = {}
+    for p in ports:
+        by_proto.setdefault(p["protocol"], []).append(p["host_port"])
+
+    groups = []
+    for proto, port_list in sorted(by_proto.items()):
+        sorted_ports = sorted(set(port_list))
+        start = end = sorted_ports[0]
+        for port in sorted_ports[1:]:
+            if port == end + 1:
+                end = port
+            else:
+                groups.append({"start_port": start, "end_port": end, "protocol": proto})
+                start = end = port
+        groups.append({"start_port": start, "end_port": end, "protocol": proto})
+    return groups
 
 
 class Reconciler:
@@ -59,8 +89,8 @@ class Reconciler:
 
         for instance_name, info in amp_instances.items():
             running = f"AMP_{instance_name}" in running_set
-            for port_info in info["ports"]:
-                expected_vip_names.add(_obj_name(instance_name, port_info["host_port"], port_info["protocol"]))
+            for g in _group_consecutive_ports(info["ports"]):
+                expected_vip_names.add(_obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"]))
             try:
                 result = self._ensure_rules(
                     instance_name, info["ports"], running,
@@ -74,7 +104,7 @@ class Reconciler:
                 logger.error("Failed to ensure rules for %s: %s", instance_name, e)
                 stats["errors"] += 1
 
-        # Delete orphans — [amp-sync] VIPs with no matching AMP instance
+        # Delete orphans — amp-sync- VIPs with no matching AMP instance
         for vip_name in set(live_vips) - expected_vip_names:
             try:
                 self._delete_port_rules(vip_name, live_policies)
@@ -119,20 +149,20 @@ class Reconciler:
         service_names: list[str] = []
         policy_ids: list = list(saved["policy_ids"]) if saved else []
 
-        for port_info in ports:
-            name = _obj_name(instance_name, port_info["host_port"], port_info["protocol"])
-            port = port_info["host_port"]
-            proto = port_info["protocol"]
+        for g in _group_consecutive_ports(ports):
+            name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
+            port_range = _port_range_str(g["start_port"], g["end_port"])
+            proto = g["protocol"]
 
             if name not in live_vips:
                 self._fg.create_vip(
-                    name=name, ext_ip=self._ext_ip, ext_port=port,
-                    mapped_ip=self._host_ip, mapped_port=port, protocol=proto,
+                    name=name, ext_ip=self._ext_ip, ext_port=port_range,
+                    mapped_ip=self._host_ip, mapped_port=port_range, protocol=proto,
                 )
                 result = "created"
 
             if name not in live_services:
-                self._fg.create_service_object(name=name, port=port, protocol=proto)
+                self._fg.create_service_object(name=name, port=port_range, protocol=proto)
                 result = "created"
 
             if name not in live_policies:
@@ -145,7 +175,6 @@ class Reconciler:
                     policy_ids.append(pid)
                 result = "created"
             else:
-                # Policy exists — update status if running state changed
                 current_status = live_policies[name].get("status", "enable")
                 if current_status != desired_status:
                     pid = live_policies[name].get("policyid") or live_policies[name].get("id")

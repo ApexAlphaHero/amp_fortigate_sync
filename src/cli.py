@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from amp_client import AMPClient
 from docker_inspector import DockerInspector
 from fortigate_client import FortigateClient
-from reconciler import _obj_name, _safe_name
+from reconciler import _obj_name, _safe_name, _group_consecutive_ports, _port_range_str
 from state_manager import StateManager
 
 
@@ -188,8 +188,8 @@ def cmd_list_instances(cfg: dict):
     )
     running_set = {c["name"] for c in inspector.get_all_containers() if c["status"] == "running"}
 
-    print(f"\n{'AMP INSTANCE':<32} {'PORT':<8} {'PROTO':<6} {'VIP / RULE NAME':<50} {'POLICY ID'}")
-    print("-" * 110)
+    print(f"\n{'AMP INSTANCE':<32} {'PORTS':<12} {'PROTO':<6} {'VIP / RULE NAME':<50} {'POLICY ID'}")
+    print("-" * 115)
     for instance_name, info in sorted(amp_instances.items()):
         saved = state.get(instance_name, {})
         policy_ids = saved.get("policy_ids", [])
@@ -197,14 +197,16 @@ def cmd_list_instances(cfg: dict):
 
         if not info["ports"]:
             status = "running" if running else "stopped"
-            print(f"{instance_name:<32} {'—':<8} {'—':<6} {'(no ports)':<50} ({status})")
+            print(f"{instance_name:<32} {'—':<12} {'—':<6} {'(no ports)':<50} ({status})")
             continue
 
-        for i, p in enumerate(info["ports"]):
-            rule_name = _obj_name(instance_name, p["host_port"], p["protocol"])
+        groups = _group_consecutive_ports(info["ports"])
+        for i, g in enumerate(groups):
+            rule_name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
+            ports_label = _port_range_str(g["start_port"], g["end_port"])
             pid = str(policy_ids[i]) if i < len(policy_ids) else "?"
             prefix = instance_name if i == 0 else ""
-            print(f"{prefix:<32} {p['host_port']:<8} {p['protocol']:<6} {rule_name:<50} {pid}")
+            print(f"{prefix:<32} {ports_label:<12} {g['protocol']:<6} {rule_name:<50} {pid}")
     print()
 
 
@@ -229,13 +231,14 @@ def cmd_dry_run(cfg: dict):
     ext_ip = fg_cfg.get("ext_ip", "<ext_ip>")
     host_ip = cfg.get("host_ip", "") or "<auto-detected>"
 
-    # Build expected rules from ALL AMP instances
+    # Build expected rules from ALL AMP instances (grouped into consecutive ranges)
     expected: list[dict] = []
     for instance_name, info in amp_instances.items():
         running = f"AMP_{instance_name}" in running_set
-        for p in info["ports"]:
-            name = _obj_name(instance_name, p["host_port"], p["protocol"])
-            expected.append({"name": name, "port": p["host_port"], "proto": p["protocol"], "running": running})
+        for g in _group_consecutive_ports(info["ports"]):
+            name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
+            port_range = _port_range_str(g["start_port"], g["end_port"])
+            expected.append({"name": name, "port_range": port_range, "proto": g["protocol"], "running": running})
 
     # Fetch existing amp-sync rules from FortiGate
     try:
@@ -271,8 +274,8 @@ def cmd_dry_run(cfg: dict):
         else:
             pol_action = "CREATE"
 
-        vip_label = f"VIP  ({ext_ip}:{r['port']} → {host_ip}:{r['port']} {r['proto'].upper()})"
-        svc_label = f"Service Object  (port {r['port']}/{r['proto']})"
+        vip_label = f"VIP  ({ext_ip}:{r['port_range']} → {host_ip}:{r['port_range']} {r['proto'].upper()})"
+        svc_label = f"Service Object  (port {r['port_range']}/{r['proto']})"
         pol_label = f"Policy"
 
         print(f"{vip_action:<8} {desired_status:<8} {vip_label:<55} {r['name']}")

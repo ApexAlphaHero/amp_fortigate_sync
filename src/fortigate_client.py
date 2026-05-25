@@ -70,9 +70,9 @@ class FortigateClient:
         self,
         name: str,
         ext_ip: str,
-        ext_port: int,
+        ext_port: str,
         mapped_ip: str,
-        mapped_port: int,
+        mapped_port: str,
         protocol: str,
     ) -> dict:
         payload = {
@@ -82,9 +82,9 @@ class FortigateClient:
             "extintf": "any",
             "portforward": "enable",
             "protocol": protocol.lower(),
-            "extport": str(ext_port),
+            "extport": ext_port,
             "mappedip": [{"range": mapped_ip}],
-            "mappedport": str(mapped_port),
+            "mappedport": mapped_port,
         }
         logger.info("Creating VIP: %s  %s:%d → %s:%d/%s", name, ext_ip, ext_port, mapped_ip, mapped_port, protocol)
         return self._request("POST", "/api/v2/cmdb/firewall/vip/", json=payload)
@@ -101,9 +101,9 @@ class FortigateClient:
         data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/")
         return [s for s in data.get("results", []) if (s.get("name") or "").startswith(_NAME_PREFIX)]
 
-    def create_service_object(self, name: str, port: int, protocol: str) -> dict:
+    def create_service_object(self, name: str, port: str, protocol: str) -> dict:
         proto_upper = protocol.upper()
-        port_str = str(port)
+        port_str = port
         payload = {
             "name": name,
             "protocol": "TCP/UDP/SCTP",

@@ -28,6 +28,7 @@ python3 -m venv "${VENV_DIR}"
 
 echo "==> Copying source files..."
 cp -r "${SCRIPT_DIR}/src/." "${INSTALL_DIR}/src/"
+cp "${SCRIPT_DIR}/config-default.yaml" "${INSTALL_DIR}/config-default.yaml"
 if [[ -f "${INSTALL_DIR}/config.yaml" ]] && ! diff -q "${SCRIPT_DIR}/config.yaml" "${INSTALL_DIR}/config.yaml" &>/dev/null; then
   echo "==> Keeping existing config.yaml (user-modified)."
 else
