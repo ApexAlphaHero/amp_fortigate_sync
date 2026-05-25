@@ -363,6 +363,7 @@ def cmd_debug_amp(cfg: dict):
             module = instance.get("ModuleName", "?")
             friendly = instance.get("FriendlyName", "")
             running = instance.get("Running", False)
+            instance_id = instance.get("InstanceID", "")
             endpoints = instance.get("ApplicationEndpoints", [])
 
             print(f"\n{'='*60}")
@@ -370,12 +371,29 @@ def cmd_debug_amp(cfg: dict):
             print(f"  ModuleName   : {module}")
             print(f"  FriendlyName : {friendly}")
             print(f"  Running      : {running}")
-            print(f"  Endpoints ({len(endpoints)}):")
+            print(f"  InstanceID   : {instance_id}")
+
+            print(f"  ApplicationEndpoints ({len(endpoints)}):")
             if endpoints:
                 for ep in endpoints:
                     print(f"    DisplayName={ep.get('DisplayName')!r:30s}  Endpoint={ep.get('Endpoint')!r}")
             else:
                 print("    (none)")
+
+            # Per-instance port summary via ADS proxy
+            if instance_id:
+                ps_data = client._post(
+                    f"/API/ADSModule/Servers/{instance_id}/API/Core/GetPortSummary"
+                )
+                if ps_data is None:
+                    print("  PortSummary  : (request failed)")
+                elif isinstance(ps_data, list):
+                    print(f"  PortSummary ({len(ps_data)}):")
+                    for ps in ps_data:
+                        print(f"    Port={ps.get('Port'):<6}  Protocol={ps.get('Protocol') or ps.get('PortType','?'):<5}  Name={ps.get('Name') or ps.get('Description','?')!r}")
+                else:
+                    # Unknown shape — dump raw so we can learn the schema
+                    print(f"  PortSummary (raw): {json.dumps(ps_data, indent=4)}")
     print()
 
 
