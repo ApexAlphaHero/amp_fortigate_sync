@@ -224,7 +224,7 @@ def main():
 
     threading.Thread(
         target=_poll_loop,
-        args=(_reconciler, _docker_inspector, cfg.get("poll_interval_minutes", 5) * 60),
+        args=(_reconciler, _docker_inspector, cfg.get("poll_interval_seconds", 300)),
         daemon=True,
         name="poll-loop",
     ).start()

@@ -23,7 +23,7 @@ fortigate:
 # Override here only if auto-detection picks the wrong interface.
 # host_ip: "192.168.1.100"
 
-poll_interval_minutes: 5
+poll_interval_seconds: 300
 log_level: "INFO"
 
 state_db_path: "/var/lib/amp-fw-sync/state.db"
