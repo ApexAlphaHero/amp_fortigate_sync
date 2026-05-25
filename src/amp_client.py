@@ -5,11 +5,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_AMP_HEADERS = {
-    "Accept": "application/vnd.cubecoders-ampapi",
-    "Content-Type": "application/json",
-}
-
 
 class AMPClient:
     def __init__(self, host: str, username: str, password: str):
@@ -17,7 +12,10 @@ class AMPClient:
         self._username = username
         self._password = password
         self._session = requests.Session()
-        self._session.headers.update(_AMP_HEADERS)
+        self._session.headers.update({
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        })
         self._session_id: Optional[str] = None
 
     def _login(self) -> bool:
@@ -25,10 +23,12 @@ class AMPClient:
             resp = self._session.post(
                 f"{self._base}/API/Core/Login",
                 json={
-                    "username": self._username,
-                    "password": self._password,
-                    "token": "",
-                    "rememberMe": False,
+                    "parameters": {
+                        "username": self._username,
+                        "password": self._password,
+                        "token": "",
+                        "rememberMe": False,
+                    }
                 },
                 timeout=5,
             )
@@ -43,27 +43,31 @@ class AMPClient:
                 logger.warning("AMP login succeeded but no sessionID in response")
                 return False
             self._session_id = session_id
+            self._session.headers["Authorization"] = f"Bearer {session_id}"
             logger.info("AMP login successful")
             return True
         except requests.RequestException as e:
             logger.warning("AMP login failed: %s", e)
             return False
 
-    def _post(self, path: str, **kwargs) -> Optional[dict]:
-        """All AMP API calls are POST with SESSIONID in the body."""
+    def _post(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
+        """All AMP API calls are POST; session ID is sent as Bearer token."""
         if not self._session_id and not self._login():
             return None
 
-        body = kwargs.get("json", {})
-        body["SESSIONID"] = self._session_id
-        kwargs["json"] = body
-
         try:
-            resp = self._session.post(f"{self._base}{path}", timeout=5, **kwargs)
+            resp = self._session.post(
+                f"{self._base}{path}",
+                json={"parameters": params or {}},
+                timeout=5,
+            )
             if resp.status_code == 401:
                 if self._login():
-                    body["SESSIONID"] = self._session_id
-                    resp = self._session.post(f"{self._base}{path}", timeout=5, **kwargs)
+                    resp = self._session.post(
+                        f"{self._base}{path}",
+                        json={"parameters": params or {}},
+                        timeout=5,
+                    )
                 else:
                     return None
             resp.raise_for_status()
@@ -73,11 +77,8 @@ class AMPClient:
             return None
 
     def get_instances(self) -> dict[str, dict]:
-        """
-        Returns a mapping of AMP instance friendly name → metadata dict including ports.
-        Falls back to empty dict if AMP is unreachable or login fails.
-        """
-        data = self._post("/API/ADSModule/GetInstances", json={})
+        """Returns a mapping of AMP instance friendly name → metadata dict including ports."""
+        data = self._post("/API/ADSModule/GetInstances")
         if data is None:
             return {}
 

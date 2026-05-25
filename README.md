@@ -44,10 +44,9 @@ Edit `config.yaml` before installing:
 |-----|-------------|
 | `docker.socket` | Docker socket path |
 | `docker.label_filter` | Only watch containers with this label (blank = all) |
-| `amp.host` | AMP web UI base URL (e.g. `http://localhost:8080`) |
+| `amp.host` | AMP web UI base URL (e.g. `http://localhost:8080`) — your AMP instance's live API browser is at `{amp.host}/API` |
 | `fortigate.host` | FortiGate base URL |
 | `fortigate.ext_ip` | FortiGate WAN/external IP — used as the VIP external address |
-| `fortigate.interfaces` | Source interfaces for created policies |
 | `fortigate.ssl_verify` | Verify FortiGate TLS certificate |
 | `poll_interval_seconds` | Fallback reconcile interval in seconds |
 
