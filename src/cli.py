@@ -77,42 +77,32 @@ def _make_amp(cfg: dict):
 # ---------------------------------------------------------------------------
 
 def cmd_query_amp(cfg: dict):
-    """Query AMP + Docker and print each instance with its exposed ports."""
+    """List all AMP instances (running and stopped) with their configured ports."""
+    amp = _make_amp(cfg)
+    if not amp:
+        print("AMP not configured.")
+        return
+
+    amp_instances = amp.get_instances()
+    if not amp_instances:
+        print("No AMP instances found (or login failed).")
+        return
+
+    # Build a name→status map from Docker for running indicator
     docker_cfg = cfg.get("docker", {})
     inspector = DockerInspector(
         socket_url=docker_cfg.get("socket", "unix:///var/run/docker.sock"),
         label_filter=docker_cfg.get("label_filter") or None,
     )
-    amp = _make_amp(cfg)
-    amp_instances = amp.get_instances() if amp else {}
+    docker_containers = {c["name"]: c["status"] for c in inspector.get_all_containers()}
 
-    containers = inspector.get_running_containers()
-    if not containers:
-        print("No running containers found.")
-        return
-
-    print(f"{'CONTAINER':<30} {'AMP INSTANCE':<30} {'PORTS':<25} {'SOURCE'}")
-    print("-" * 95)
-    for c in containers:
-        amp_label = amp.resolve_container_name(c["name"], amp_instances) if amp else c["name"]
-
-        amp_ports = amp_instances.get(amp_label, {}).get("ports", []) if amp else []
-        docker_ports = c["ports"]
-
-        if amp_ports:
-            ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in amp_ports)
-            source = "amp"
-        elif docker_ports:
-            ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in docker_ports)
-            source = "docker"
-        else:
-            ports_str = "(none)"
-            source = ""
-
-        print(f"{c['name']:<30} {amp_label:<30} {ports_str:<25} {source}")
-
-    if not amp:
-        print("\n(AMP not configured — showing Docker container names only)")
+    print(f"{'AMP INSTANCE':<30} {'STATUS':<10} {'PORTS'}")
+    print("-" * 75)
+    for name, info in sorted(amp_instances.items()):
+        docker_name = f"AMP_{name}"
+        docker_status = docker_containers.get(docker_name, "no container")
+        ports_str = ", ".join(f"{p['host_port']}/{p['protocol']}" for p in info["ports"]) or "(none)"
+        print(f"{name:<30} {docker_status:<10} {ports_str}")
 
 
 def cmd_query_fw(cfg: dict):

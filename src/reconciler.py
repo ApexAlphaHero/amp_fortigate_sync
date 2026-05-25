@@ -45,12 +45,11 @@ class Reconciler:
         current_containers = {c["id"]: c for c in self._docker.get_running_containers()}
         amp_instances = self._amp.get_instances() if self._amp else {}
 
-        # Prefer AMP ports (clean game ports only); fall back to /proc-detected ports
+        # Use AMP ApplicationEndpoints as the authoritative port list when available
         for c in current_containers.values():
             label = self._resolve_label(c, amp_instances)
             amp_ports = amp_instances.get(label, {}).get("ports", [])
             if amp_ports:
-                logger.debug("Using AMP ports for %s: %s", c["name"], amp_ports)
                 c["ports"] = amp_ports
 
         # Pull live [amp-sync]-tagged objects from FortiGate
