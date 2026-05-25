@@ -380,20 +380,20 @@ def cmd_debug_amp(cfg: dict):
             else:
                 print("    (none)")
 
-            # Per-instance port summary via ADS proxy
+            # Per-instance network info
             if instance_id:
-                ps_data = client._post(
-                    f"/API/ADSModule/Servers/{instance_id}/API/Core/GetPortSummary"
+                ni_data = client._post(
+                    "/API/ADSModule/GetInstanceNetworkInfo",
+                    {"InstanceId": instance_id},
                 )
-                if ps_data is None:
-                    print("  PortSummary  : (request failed)")
-                elif isinstance(ps_data, list):
-                    print(f"  PortSummary ({len(ps_data)}):")
-                    for ps in ps_data:
-                        print(f"    Port={ps.get('Port'):<6}  Protocol={ps.get('Protocol') or ps.get('PortType','?'):<5}  Name={ps.get('Name') or ps.get('Description','?')!r}")
+                if ni_data is None:
+                    print("  NetworkInfo  : (request failed)")
+                elif isinstance(ni_data, list):
+                    print(f"  NetworkInfo ({len(ni_data)}):")
+                    for ni in ni_data:
+                        print(f"    {json.dumps(ni)}")
                 else:
-                    # Unknown shape — dump raw so we can learn the schema
-                    print(f"  PortSummary (raw): {json.dumps(ps_data, indent=4)}")
+                    print(f"  NetworkInfo (raw): {json.dumps(ni_data, indent=4)}")
     print()
 
 
