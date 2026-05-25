@@ -81,6 +81,7 @@ def _make_reconciler(cfg: dict):
     )
     reconciler._ssl_ssh_profile = fg_cfg.get("ssl_ssh_profile") or None
     reconciler._policy_insert_after = fg_cfg.get("policy_insert_after") or None
+    reconciler._service_category = fg_cfg.get("service_category") or None
     return reconciler
 
 
@@ -276,11 +277,27 @@ def cmd_dry_run(cfg: dict):
 
         for r in groups:
             vip_action = "exists" if r["name"] in live_vip_names else "CREATE"
-            svc_action = "exists" if r["name"] in live_svc_names else "CREATE"
             vip_label = f"VIP  ({ext_ip}:{r['port_range']} → {host_ip}:{r['port_range']} {r['proto'].upper()})"
-            svc_label = f"Service Object  (port {r['port_range']}/{r['proto']})"
             print(f"{vip_action:<8} {'':<8} {vip_label:<55} {r['name']}")
-            print(f"{svc_action:<8} {'':<8} {svc_label:<55} {r['name']}")
+
+        # One service object per instance
+        svc_name = _policy_name(instance_name)
+        tcp_ranges = [r["port_range"] for r in groups if r["proto"] == "tcp"]
+        udp_ranges = [r["port_range"] for r in groups if r["proto"] == "udp"]
+        parts = []
+        if tcp_ranges:
+            parts.append(f"tcp:{' '.join(tcp_ranges)}")
+        if udp_ranges:
+            parts.append(f"udp:{' '.join(udp_ranges)}")
+        svc_action = "exists" if svc_name in live_svc_names else "CREATE"
+        if svc_action == "exists":
+            live_svc = next((s for s in fg.get_managed_service_objects() if s["name"] == svc_name), {})
+            live_tcp = set((live_svc.get("tcp-portrange") or "").split())
+            live_udp = set((live_svc.get("udp-portrange") or "").split())
+            if live_tcp != set(tcp_ranges) or live_udp != set(udp_ranges):
+                svc_action = "UPDATE"
+        svc_label = f"Service Object  ({', '.join(parts)})"
+        print(f"{svc_action:<8} {'':<8} {svc_label:<55} {svc_name}")
 
         if pol_name in live_policies:
             current_status = live_policies[pol_name].get("status", "enable")

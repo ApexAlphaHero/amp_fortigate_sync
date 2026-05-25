@@ -75,6 +75,7 @@ class Reconciler:
         self._amp = amp_client
         self._ssl_ssh_profile: Optional[str] = None
         self._policy_insert_after: Optional[int] = None
+        self._service_category: Optional[str] = None
 
     def reconcile(self) -> dict:
         amp_instances = self._amp.get_instances() if self._amp else {}
@@ -89,14 +90,14 @@ class Reconciler:
         live_policies = {p["name"]: p for p in self._fg.get_managed_policies()}
 
         expected_vip_names: set[str] = set()
-        expected_policy_names: set[str] = set()
+        expected_instance_names: set[str] = set()
         stats = {"added": 0, "removed": 0, "updated": 0, "errors": 0}
 
         for instance_name, info in amp_instances.items():
             running = f"AMP_{instance_name}" in running_set
             for g in _group_consecutive_ports(info["ports"]):
                 expected_vip_names.add(_obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"]))
-            expected_policy_names.add(_policy_name(instance_name))
+            expected_instance_names.add(_policy_name(instance_name))
             try:
                 result = self._ensure_rules(
                     instance_name, info["ports"], running,
@@ -110,10 +111,9 @@ class Reconciler:
                 logger.error("Failed to ensure rules for %s: %s", instance_name, e)
                 stats["errors"] += 1
 
-        # Delete orphan VIPs and their service objects
+        # Delete orphan VIPs
         for vip_name in set(live_vips) - expected_vip_names:
             try:
-                self._fg.delete_service_object(vip_name)
                 self._fg.delete_vip(vip_name)
                 self._remove_state_by_vip(vip_name)
                 stats["removed"] += 1
@@ -121,15 +121,23 @@ class Reconciler:
                 logger.error("Failed to delete orphan VIP %s: %s", vip_name, e)
                 stats["errors"] += 1
 
-        # Delete orphan policies
-        for pol_name in set(live_policies) - expected_policy_names:
+        # Delete orphan service objects and policies (keyed by instance name)
+        for name in set(live_services) - expected_instance_names:
             try:
-                pid = live_policies[pol_name].get("policyid") or live_policies[pol_name].get("id")
+                self._fg.delete_service_object(name)
+                stats["removed"] += 1
+            except Exception as e:
+                logger.error("Failed to delete orphan service object %s: %s", name, e)
+                stats["errors"] += 1
+
+        for name in set(live_policies) - expected_instance_names:
+            try:
+                pid = live_policies[name].get("policyid") or live_policies[name].get("id")
                 if pid is not None:
                     self._fg.delete_policy(pid)
                 stats["removed"] += 1
             except Exception as e:
-                logger.error("Failed to delete orphan policy %s: %s", pol_name, e)
+                logger.error("Failed to delete orphan policy %s: %s", name, e)
                 stats["errors"] += 1
 
         logger.info("Reconcile: +%d -%d ~%d errors=%d",
@@ -152,53 +160,62 @@ class Reconciler:
         saved = self._state.get(instance_name)
         desired_status = "enable" if running else "disable"
         result = "unchanged"
-        pol_name = _policy_name(instance_name)
+        inst_name = _policy_name(instance_name)  # amp-sync-{instance} — used for service obj + policy
 
-        # Rebuild VIPs/services/policy if ports changed
+        # Rebuild VIPs and policy if ports changed (service object is updated in-place)
         if saved and _ports_key(saved["ports"]) != _ports_key(ports):
-            logger.info("Port change for %s — rebuilding rules", instance_name)
+            logger.info("Port change for %s — rebuilding VIPs and policy", instance_name)
             for vip_name in saved.get("vip_names", []):
-                self._fg.delete_service_object(vip_name)
                 self._fg.delete_vip(vip_name)
                 live_vips.pop(vip_name, None)
-                live_services.pop(vip_name, None)
-            if pol_name in live_policies:
-                pid = live_policies[pol_name].get("policyid") or live_policies[pol_name].get("id")
+            if inst_name in live_policies:
+                pid = live_policies[inst_name].get("policyid") or live_policies[inst_name].get("id")
                 if pid is not None:
                     self._fg.delete_policy(pid)
-                live_policies.pop(pol_name)
+                live_policies.pop(inst_name)
             saved = None
 
+        groups = _group_consecutive_ports(ports)
+        tcp_ranges = [_port_range_str(g["start_port"], g["end_port"]) for g in groups if g["protocol"] == "tcp"]
+        udp_ranges = [_port_range_str(g["start_port"], g["end_port"]) for g in groups if g["protocol"] == "udp"]
+
+        # VIPs — one per port group
         vip_names: list[str] = []
-        service_names: list[str] = []
-
-        for g in _group_consecutive_ports(ports):
-            name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
-            port_range = _port_range_str(g["start_port"], g["end_port"])
-            proto = g["protocol"]
-
-            if name not in live_vips:
+        for g in groups:
+            vip_name = _obj_name(instance_name, g["start_port"], g["end_port"], g["protocol"])
+            if vip_name not in live_vips:
                 self._fg.create_vip(
-                    name=name, ext_ip=self._ext_ip, ext_port=port_range,
-                    mapped_ip=self._host_ip, mapped_port=port_range, protocol=proto,
+                    name=vip_name, ext_ip=self._ext_ip,
+                    ext_port=_port_range_str(g["start_port"], g["end_port"]),
+                    mapped_ip=self._host_ip,
+                    mapped_port=_port_range_str(g["start_port"], g["end_port"]),
+                    protocol=g["protocol"],
                 )
                 result = "created"
+            vip_names.append(vip_name)
 
-            if name not in live_services:
-                self._fg.create_service_object(name=name, port=port_range, protocol=proto)
-                result = "created"
+        # Service object — one per instance, all TCP + UDP ranges combined
+        if inst_name not in live_services:
+            self._fg.create_service_object(inst_name, tcp_ranges, udp_ranges, self._service_category)
+            result = "created"
+        else:
+            current = live_services[inst_name]
+            current_tcp = set((current.get("tcp-portrange") or "").split())
+            current_udp = set((current.get("udp-portrange") or "").split())
+            if current_tcp != set(tcp_ranges) or current_udp != set(udp_ranges):
+                self._fg.update_service_object(inst_name, tcp_ranges, udp_ranges, self._service_category)
+                if result == "unchanged":
+                    result = "updated"
 
-            vip_names.append(name)
-            service_names.append(name)
-
-        # One policy per instance covering all VIPs and service objects
+        # Policy — one per instance
         policy_id = saved.get("policy_id") if saved else None
+        svc_list = [inst_name]
 
-        if pol_name not in live_policies:
+        if inst_name not in live_policies:
             resp = self._fg.create_policy(
-                name=pol_name,
+                name=inst_name,
                 vip_names=vip_names,
-                service_obj_names=service_names,
+                service_obj_names=svc_list,
                 status=desired_status,
                 ssl_ssh_profile=self._ssl_ssh_profile,
             )
@@ -207,19 +224,17 @@ class Reconciler:
                 self._fg.move_policy_after(policy_id, self._policy_insert_after)
             result = "created"
         else:
-            current = live_policies[pol_name]
+            current = live_policies[inst_name]
             current_status = current.get("status", "enable")
             current_dstaddr = {d["name"] for d in (current.get("dstaddr") or [])}
-            current_service = {s["name"] for s in (current.get("service") or [])}
             needs_update = (
                 current_status != desired_status
                 or current_dstaddr != set(vip_names)
-                or current_service != set(service_names)
             )
             if needs_update:
                 pid = current.get("policyid") or current.get("id")
                 if pid is not None:
-                    self._fg.update_policy(pid, vip_names, service_names, desired_status)
+                    self._fg.update_policy(pid, vip_names, svc_list, desired_status)
                     policy_id = pid
                 if result == "unchanged":
                     result = "updated"
@@ -229,7 +244,6 @@ class Reconciler:
             "running": running,
             "policy_id": policy_id,
             "vip_names": vip_names,
-            "service_obj_names": service_names,
         })
         return result
 
@@ -245,7 +259,6 @@ class Reconciler:
                     self._state.remove(instance_name)
                 else:
                     data["vip_names"] = remaining
-                    data["service_obj_names"] = [s for s in data["service_obj_names"] if s != vip_name]
                     self._state.save(instance_name, data)
                 return
 

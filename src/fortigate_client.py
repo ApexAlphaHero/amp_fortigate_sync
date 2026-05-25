@@ -86,7 +86,7 @@ class FortigateClient:
             "mappedip": [{"range": mapped_ip}],
             "mappedport": mapped_port,
         }
-        logger.info("Creating VIP: %s  %s:%d → %s:%d/%s", name, ext_ip, ext_port, mapped_ip, mapped_port, protocol)
+        logger.info("Creating VIP: %s  %s:%s → %s:%s/%s", name, ext_ip, ext_port, mapped_ip, mapped_port, protocol)
         return self._request("POST", "/api/v2/cmdb/firewall/vip/", json=payload)
 
     def delete_vip(self, name: str):
@@ -101,19 +101,42 @@ class FortigateClient:
         data = self._request("GET", "/api/v2/cmdb/firewall.service/custom/")
         return [s for s in data.get("results", []) if (s.get("name") or "").startswith(_NAME_PREFIX)]
 
-    def create_service_object(self, name: str, port: str, protocol: str) -> dict:
-        proto_upper = protocol.upper()
-        port_str = port
-        payload = {
-            "name": name,
-            "protocol": "TCP/UDP/SCTP",
-        }
-        if proto_upper == "UDP":
-            payload["udp-portrange"] = port_str
-        else:
-            payload["tcp-portrange"] = port_str
-        logger.info("Creating service object: %s  port %d/%s", name, port, protocol)
+    def _service_payload(
+        self,
+        tcp_ranges: list[str],
+        udp_ranges: list[str],
+        category: Optional[str],
+    ) -> dict:
+        payload: dict = {"protocol": "TCP/UDP/SCTP"}
+        if tcp_ranges:
+            payload["tcp-portrange"] = " ".join(tcp_ranges)
+        if udp_ranges:
+            payload["udp-portrange"] = " ".join(udp_ranges)
+        if category:
+            payload["category"] = category
+        return payload
+
+    def create_service_object(
+        self,
+        name: str,
+        tcp_ranges: list[str],
+        udp_ranges: list[str],
+        category: Optional[str] = None,
+    ) -> dict:
+        payload = {"name": name, **self._service_payload(tcp_ranges, udp_ranges, category)}
+        logger.info("Creating service object: %s  tcp=%s udp=%s", name, tcp_ranges, udp_ranges)
         return self._request("POST", "/api/v2/cmdb/firewall.service/custom/", json=payload)
+
+    def update_service_object(
+        self,
+        name: str,
+        tcp_ranges: list[str],
+        udp_ranges: list[str],
+        category: Optional[str] = None,
+    ):
+        payload = self._service_payload(tcp_ranges, udp_ranges, category)
+        logger.info("Updating service object: %s  tcp=%s udp=%s", name, tcp_ranges, udp_ranges)
+        self._request("PUT", f"/api/v2/cmdb/firewall.service/custom/{name}", json=payload)
 
     def delete_service_object(self, name: str):
         logger.info("Deleting service object: %s", name)
