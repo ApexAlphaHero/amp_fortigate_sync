@@ -78,6 +78,9 @@ class Reconciler:
         self._service_category: Optional[str] = None
 
     def reconcile(self) -> dict:
+        if self._service_category:
+            self._fg.ensure_service_category(self._service_category)
+
         amp_instances = self._amp.get_instances() if self._amp else {}
 
         running_set = {

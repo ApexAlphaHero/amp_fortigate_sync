@@ -142,6 +142,14 @@ def cmd_query_fw(cfg: dict):
     vips = fg.get_managed_vips()
     services = fg.get_managed_service_objects()
     policies = fg.get_managed_policies()
+    categories = fg.get_service_categories()
+
+    print(f"\n=== Service Categories ({len(categories)}) ===")
+    if categories:
+        names = [c.get("name", "?") for c in categories]
+        print("  " + ", ".join(names))
+    else:
+        print("  (none)")
 
     print(f"\n=== Virtual IPs ({len(vips)}) ===")
     if vips:
