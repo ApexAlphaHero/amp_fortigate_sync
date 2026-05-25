@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from amp_client import AMPClient
 from docker_inspector import DockerInspector
 from fortigate_client import FortigateClient
-from reconciler import _obj_name, _safe_name
+from reconciler import _obj_name, _safe_name, apply_instance_port_overrides
 from state_manager import StateManager
 
 
@@ -109,7 +109,7 @@ def cmd_query_amp(cfg: dict):
         print("AMP not configured.")
         return
 
-    amp_instances = amp.get_instances()
+    amp_instances = apply_instance_port_overrides(amp.get_instances(), cfg)
     if not amp_instances:
         print("No AMP instances found (or login failed).")
         return
@@ -219,7 +219,7 @@ def cmd_list_instances(cfg: dict):
 def cmd_dry_run(cfg: dict):
     """Show what FortiGate rules would be created/deleted without making changes."""
     amp = _make_amp(cfg)
-    amp_instances = amp.get_instances() if amp else {}
+    amp_instances = apply_instance_port_overrides(amp.get_instances() if amp else {}, cfg)
 
     docker_cfg = cfg.get("docker", {})
     inspector = DockerInspector(

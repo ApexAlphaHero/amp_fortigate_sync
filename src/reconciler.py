@@ -15,6 +15,22 @@ def _ports_key(ports: list[dict]) -> frozenset:
     return frozenset((p["host_port"], p["protocol"]) for p in ports)
 
 
+def apply_instance_port_overrides(amp_instances: dict, cfg: dict) -> dict:
+    """Replace AMP-reported ports with config overrides where specified."""
+    overrides = cfg.get("instance_ports", {})
+    if not overrides:
+        return amp_instances
+    result = dict(amp_instances)
+    for instance_name, port_list in overrides.items():
+        if instance_name in result:
+            result[instance_name] = dict(result[instance_name])
+            result[instance_name]["ports"] = [
+                {"host_port": int(p["port"]), "protocol": p["protocol"]}
+                for p in port_list
+            ]
+    return result
+
+
 def _safe_name(raw: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)[:63]
 
@@ -40,10 +56,14 @@ class Reconciler:
         self._ext_ip = ext_ip
         self._host_ip = host_ip or self._detect_host_ip()
         self._amp = amp_client
+        self._cfg: dict = {}
 
     def reconcile(self) -> dict:
         current_containers = {c["id"]: c for c in self._docker.get_running_containers()}
-        amp_instances = self._amp.get_instances() if self._amp else {}
+        amp_instances = apply_instance_port_overrides(
+            self._amp.get_instances() if self._amp else {},
+            self._cfg,
+        )
 
         # Use AMP ApplicationEndpoints as the authoritative port list when available
         for c in current_containers.values():
