@@ -133,13 +133,13 @@ class FortigateClient:
         udp_ranges: list[str],
         category: Optional[str],
     ) -> dict:
-        payload: dict = {"protocol": "TCP/UDP/SCTP"}
+        payload: dict = {"protocol": "TCP/UDP/UDP-Lite/SCTP"}
         if tcp_ranges:
             payload["tcp-portrange"] = " ".join(tcp_ranges)
         if udp_ranges:
             payload["udp-portrange"] = " ".join(udp_ranges)
         if category:
-            payload["category"] = [{"name": category}]
+            payload["category"] = category
         return payload
 
     def create_service_object(
