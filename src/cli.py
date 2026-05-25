@@ -385,6 +385,7 @@ def cmd_debug_amp(cfg: dict):
                 ni_data = client._post(
                     "/API/ADSModule/GetInstanceNetworkInfo",
                     {"InstanceName": name},
+                    wrap=False,
                 )
                 if ni_data is None:
                     print("  NetworkInfo  : (request failed)")

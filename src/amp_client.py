@@ -47,24 +47,21 @@ class AMPClient:
             logger.warning("AMP login failed: %s", e)
             return False
 
-    def _post(self, path: str, params: Optional[dict] = None) -> Optional[dict]:
-        """All AMP API calls are POST; session ID is sent as Bearer token."""
+    def _post(self, path: str, params: Optional[dict] = None, wrap: bool = True) -> Optional[dict]:
+        """All AMP API calls are POST; session ID is sent as Bearer token.
+
+        Most endpoints expect {"parameters": {...}}; pass wrap=False for the
+        few that expect a flat body instead.
+        """
         if not self._session_id and not self._login():
             return None
 
+        body = {"parameters": params or {}} if wrap else (params or {})
         try:
-            resp = self._session.post(
-                f"{self._base}{path}",
-                json={"parameters": params or {}},
-                timeout=5,
-            )
+            resp = self._session.post(f"{self._base}{path}", json=body, timeout=5)
             if resp.status_code == 401:
                 if self._login():
-                    resp = self._session.post(
-                        f"{self._base}{path}",
-                        json={"parameters": params or {}},
-                        timeout=5,
-                    )
+                    resp = self._session.post(f"{self._base}{path}", json=body, timeout=5)
                 else:
                     return None
             resp.raise_for_status()
