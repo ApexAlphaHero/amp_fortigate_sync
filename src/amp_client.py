@@ -98,6 +98,14 @@ class AMPClient:
                 if module.upper().startswith("ADS") or name in self._excluded:
                     continue
                 ports = self._get_network_ports(name)
+                if ports is None:
+                    # Network-info fetch failed — we can't trust the port list for this
+                    # instance. Abort the whole enumeration so the reconciler skips rather
+                    # than acting on incomplete data (which could delete this instance's rules).
+                    logger.warning(
+                        "Network info fetch failed for %s — aborting AMP enumeration", name
+                    )
+                    return None
                 instances[name] = {
                     "instance_id": instance.get("InstanceID"),
                     "module": module,
@@ -107,18 +115,25 @@ class AMPClient:
                 }
         return instances
 
-    def _get_network_ports(self, instance_name: str) -> list[dict]:
+    def _get_network_ports(self, instance_name: str) -> Optional[list[dict]]:
         """Fetch per-instance port list via GetInstanceNetworkInfo.
 
         Uses IsFirewallTarget to identify ports that need forwarding, and
         the Protocol field for the actual transport (0=TCP, 1=UDP, 2=both).
         SFTP and RCON ports are excluded.
+
+        Returns None if the AMP request failed (unreachable / login error), so
+        the caller can distinguish a fetch failure from an instance that
+        genuinely has no firewall-target ports ([]).
         """
         data = self._post(
             "/API/ADSModule/GetInstanceNetworkInfo",
             {"InstanceName": instance_name},
             wrap=False,
         )
+        if data is None:
+            logger.warning("GetInstanceNetworkInfo for %s failed (AMP unreachable)", instance_name)
+            return None
         if not isinstance(data, list):
             logger.warning("GetInstanceNetworkInfo for %s returned unexpected data: %s", instance_name, data)
             return []
