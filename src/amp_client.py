@@ -75,14 +75,17 @@ class AMPClient:
             logger.warning("AMP API request failed: %s", e)
             return None
 
-    def get_instances(self) -> dict[str, dict]:
+    def get_instances(self) -> Optional[dict[str, dict]]:
         """Returns a mapping of AMP InstanceName → metadata dict including ports.
 
+        Returns None if the AMP fetch failed (login error or unreachable) so
+        callers can distinguish "AMP is down" from "AMP has zero instances" —
+        an empty dict means AMP answered but has no eligible instances.
         Keyed by InstanceName (unique) rather than FriendlyName (may collide).
         """
         data = self._post("/API/ADSModule/GetInstances")
         if data is None:
-            return {}
+            return None
 
         instances = {}
         entries = data if isinstance(data, list) else data.get("result", [])
@@ -146,7 +149,7 @@ class AMPClient:
         stripping that prefix first before falling back to substring matching.
         """
         if instances is None:
-            instances = self.get_instances()
+            instances = self.get_instances() or {}
 
         # Exact match after stripping the AMP_ prefix
         clean = container_name.removeprefix("AMP_")

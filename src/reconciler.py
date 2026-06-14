@@ -80,10 +80,22 @@ class Reconciler:
         self._srcaddr: list[str] = ["all"]
 
     def reconcile(self) -> dict:
+        # Fetch AMP state first. If AMP is configured but unreachable, get_instances()
+        # returns None — bail out WITHOUT touching the firewall. Treating a failed
+        # fetch as "no instances" would delete every managed rule as an orphan.
+        if self._amp:
+            amp_instances = self._amp.get_instances()
+            if amp_instances is None:
+                logger.warning(
+                    "AMP fetch failed (unreachable or login error) — skipping reconcile "
+                    "to avoid deleting rules. Will retry on next poll cycle."
+                )
+                return {"added": 0, "removed": 0, "updated": 0, "errors": 0, "skipped": True}
+        else:
+            amp_instances = {}
+
         if self._service_category:
             self._fg.ensure_service_category(self._service_category)
-
-        amp_instances = self._amp.get_instances() if self._amp else {}
 
         running_set = {
             c["name"] for c in self._docker.get_all_containers()

@@ -188,7 +188,7 @@ def cmd_query_fw(cfg: dict):
 def cmd_list_instances(cfg: dict):
     """List AMP instances alongside their expected firewall rule names and policy IDs."""
     amp = _make_amp(cfg)
-    amp_instances = amp.get_instances() if amp else {}
+    amp_instances = (amp.get_instances() or {}) if amp else {}
 
     db_path = cfg.get("state_db_path", "/var/lib/amp-fw-sync/state.db")
     state: dict = {}
@@ -233,7 +233,7 @@ def cmd_list_instances(cfg: dict):
 def cmd_dry_run(cfg: dict):
     """Show what FortiGate rules would be created/deleted without making changes."""
     amp = _make_amp(cfg)
-    amp_instances = amp.get_instances() if amp else {}
+    amp_instances = (amp.get_instances() or {}) if amp else {}
 
     docker_cfg = cfg.get("docker", {})
     inspector = DockerInspector(
