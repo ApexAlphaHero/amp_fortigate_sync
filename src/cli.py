@@ -15,8 +15,6 @@ import os
 import sys
 from pathlib import Path
 
-import requests as _requests
-
 import yaml
 from dotenv import load_dotenv
 
@@ -353,33 +351,15 @@ def _sync_flag_path(cfg: dict) -> Path:
     return Path(db_path).parent / "sync_enabled"
 
 
-def _notify_service(endpoint: str):
-    """Best-effort POST to the running service; silently ignored if not running."""
-    try:
-        _requests.post(f"http://localhost:8000{endpoint}", timeout=3)
-    except Exception:
-        pass
-
-
 def cmd_sync_now(cfg: dict):
     """Trigger an immediate reconcile, bypassing the poll interval."""
     flag = _sync_flag_path(cfg)
     if not flag.exists():
         print("WARNING: Sync is currently DISABLED. Running a one-off reconcile anyway.")
 
-    # Try the running service first for minimal disruption
-    try:
-        r = _requests.post("http://localhost:8000/sync/now", timeout=10)
-        if r.ok:
-            data = r.json()
-            stats = data.get("stats", {})
-            print(f"Reconcile complete: +{stats.get('added', 0)} added, -{stats.get('removed', 0)} removed, {stats.get('errors', 0)} errors")
-            return
-    except Exception:
-        pass
-
-    # Service not running — run reconcile directly
-    print("Service not running; reconciling directly...")
+    # The service has no HTTP control endpoints (they were unauthenticated), so
+    # always run the reconcile directly in this process.
+    print("Reconciling directly...")
     reconciler = _make_reconciler(cfg)
     stats = reconciler.reconcile()
     print(f"Reconcile complete: +{stats.get('added', 0)} added, -{stats.get('removed', 0)} removed, {stats.get('errors', 0)} errors")
@@ -456,7 +436,6 @@ def cmd_enable_sync(cfg: dict):
     flag.parent.mkdir(parents=True, exist_ok=True)
     flag.touch()
     print("Sync ENABLED.")
-    _notify_service("/sync/enable")
     print("Service will reconcile immediately (if running) or on next poll cycle.")
 
 
@@ -464,7 +443,6 @@ def cmd_disable_sync(cfg: dict):
     flag = _sync_flag_path(cfg)
     flag.unlink(missing_ok=True)
     print("Sync DISABLED. No further firewall changes will be made.")
-    _notify_service("/sync/disable")
 
 
 # ---------------------------------------------------------------------------
