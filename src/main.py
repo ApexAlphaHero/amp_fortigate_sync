@@ -74,37 +74,12 @@ def status():
     return {**_status, "sync_enabled": _sync_flag.exists() if _sync_flag else False}
 
 
-@app.post("/sync/now")
-def sync_now():
-    stats = {}
-    if _reconciler and _docker_inspector:
-        from reconciler import Reconciler
-        s = _reconciler.reconcile()
-        _status["last_reconcile"] = datetime.now(timezone.utc).isoformat()
-        _status["last_reconcile_stats"] = s
-        _status["container_count"] = len(_docker_inspector.get_running_containers())
-        stats = s
-    return {"stats": stats}
-
-
-@app.post("/sync/enable")
-def sync_enable():
-    _sync_flag.touch()
-    _status["sync_enabled"] = True
-    threading.Thread(
-        target=_run_reconcile,
-        args=(_reconciler, _docker_inspector),
-        daemon=True,
-        name="reconcile-on-enable",
-    ).start()
-    return {"sync_enabled": True, "message": "Sync enabled; reconcile triggered"}
-
-
-@app.post("/sync/disable")
-def sync_disable():
-    _sync_flag.unlink(missing_ok=True)
-    _status["sync_enabled"] = False
-    return {"sync_enabled": False, "message": "Sync disabled"}
+# Sync is deliberately NOT controllable over HTTP: this server listens on
+# 0.0.0.0 with no authentication, so state-changing routes (enable, disable,
+# reconcile-now) would let any network client make the service write to the
+# FortiGate. Sync is controlled through the flag file instead, via
+# `cli.py enable-sync` / `disable-sync`, which is protected by filesystem
+# permissions on the state directory.
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +113,19 @@ def _poll_loop(reconciler: Reconciler, docker_inspector: DockerInspector, interv
     logger = logging.getLogger("poll_loop")
     schedule.every(interval).seconds.do(_run_reconcile, reconciler, docker_inspector)
     logger.info("Poll loop started (interval=%ds)", interval)
+    was_enabled = bool(_sync_flag and _sync_flag.exists())
     while True:
         schedule.run_pending()
+        # `cli.py enable-sync` creates the flag file; reconcile as soon as it
+        # appears instead of waiting for the next poll interval.
+        enabled = bool(_sync_flag and _sync_flag.exists())
+        if enabled and not was_enabled:
+            logger.info("Sync flag created — running reconcile")
+            try:
+                _run_reconcile(reconciler, docker_inspector)
+            except Exception as e:
+                logger.error("Reconcile after enabling sync failed: %s", e)
+        was_enabled = enabled
         time.sleep(1)
 
 
@@ -219,7 +205,7 @@ def main():
         logger.info("Sync is ENABLED — running initial reconcile")
         _run_reconcile(_reconciler, _docker_inspector)
     else:
-        logger.info("Sync is DISABLED — run 'cli.py enable-sync' or POST /sync/enable to start syncing")
+        logger.info("Sync is DISABLED — run 'cli.py enable-sync' to start syncing")
 
     threading.Thread(
         target=_event_listener,

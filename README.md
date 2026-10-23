@@ -130,15 +130,14 @@ sudo /opt/amp-fw-sync/venv/bin/python /opt/amp-fw-sync/src/cli.py disable-sync
 
 ## Health and status
 
-The service exposes a small HTTP API on port 8000:
+The service exposes a small read-only HTTP API on port 8000:
 
 ```bash
 curl http://localhost:8000/health    # {"status": "ok"}
 curl http://localhost:8000/status    # last reconcile time, container count, sync state
-curl -X POST http://localhost:8000/sync/now     # trigger reconcile
-curl -X POST http://localhost:8000/sync/enable  # enable sync
-curl -X POST http://localhost:8000/sync/disable # disable sync
 ```
+
+The HTTP API has no authentication, so it cannot change anything: sync is enabled and disabled only through the CLI (`enable-sync` / `disable-sync`), which toggles the `sync_enabled` flag file. Access to that file is controlled by filesystem permissions on `/var/lib/amp-fw-sync`. The running service notices the flag file within about a second and reconciles as soon as sync is enabled.
 
 ## Service management
 
